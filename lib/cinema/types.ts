@@ -1,0 +1,13 @@
+export type Movie = { id:string;title:string;duration:number;genres:string;age:string;language:string;description:string;poster_url:string;trailer_url:string;director:string;actors:string;country:string;release_date:string|null;status:string;weekly_tickets_sold?:number };
+export type Room = { id:string;name:string;capacity?:number;status:string };
+export type Seat = { id:string;room_id?:string;label:string;row_no:number;col_no:number;kind:string;status?:string;mine?:boolean;expires_at?:string|null };
+export type Show = { id:string;movie_id:string;room_id:string;starts_at:string;ends_at:string;format:string;base_price:number;status:string };
+export type Profile = { id:string;full_name:string;phone:string;role:'customer'|'staff';active:boolean;email?:string };
+export type Promotion = { id:string;code:string;name:string;kind:string;value:number;max_discount:number|null;min_order:number;starts_at:string;ends_at:string;max_uses:number|null;used_count:number;status:string };
+export type Item = { id:string;seat_id:string;label:string;kind:string;price:number };
+export type Ticket = { id:string;seat_id:string;code:string;qr_token:string;status:string;issued_at:string };
+export type Transaction = { id:string;order_id:string;kind:string;result:string;amount:number;method:string;reason:string|null;created_at:string };
+export type Order = { id:string;code:string;user_id:string;showtime_id:string;hold_id:string;status:string;subtotal:number;discount:number;total:number;promotion_code:string|null;promotion_id:string|null;created_at:string;expires_at:string;paid_at:string|null;cancelled_at:string|null;movie_title:string;room_name:string;show_starts_at:string;show_format:string;order_items:Item[];tickets:Ticket[];transactions:Transaction[] };
+export type Catalog = { movies:Movie[];rooms:Room[];showtimes:Show[];server_now:string;weekly_sales_period?:{starts_at:string;ends_at:string;timezone:string} };
+export type AdminData = Catalog & { seats:Seat[];orders:Order[];promotions:Promotion[];profiles:Profile[];inventory:{showtime_id:string;seat_id:string;status:string;expires_at:string|null}[] };
+export type Hold = { id:string;showtime_id:string;expires_at:string;quoted_total:number;status:string;server_now:string;seats:Seat[] };

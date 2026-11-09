@@ -1,0 +1,12 @@
+import fs from 'node:fs';import vm from 'node:vm';import path from 'node:path';import {fileURLToPath} from 'node:url';import assert from 'node:assert/strict';import ts from 'typescript';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..'),compiled={exports:{}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,'lib/cinema/featured.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{module:compiled,exports:compiled.exports});
+const {selectFeaturedMovie:select}=compiled.exports;
+const movie=(id,sales,status='showing')=>({id,status,weekly_tickets_sold:sales});
+const list=[movie('1',2),movie('2',5),movie('3',3)];assert.equal(select(list).id,'2');assert.deepEqual(list.map(movie=>movie.id),['1','2','3']);
+assert.equal(select([movie('12',3),movie('2',3)]).id,'2');
+assert.equal(select([movie('9007199254740993',3),movie('9007199254740992',3)]).id,'9007199254740992');
+assert.equal(select([movie('1',0,'coming'),movie('2',undefined)]).id,'2');
+assert.equal(select([movie('1',20,'stopped'),movie('2',5,'coming'),movie('3',4)]).id,'2');
+assert.equal(select([movie('1',5,'stopped')]),undefined);assert.equal(select(),undefined);
+console.log('PASS weekly featured selection, stable ties, fallback, presales and stopped film exclusion.');

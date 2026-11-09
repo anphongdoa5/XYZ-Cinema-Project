@@ -1,0 +1,11 @@
+import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';import ts from 'typescript';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..'),compiled={exports:{}};
+const source=fs.readFileSync(path.join(root,'lib/cinema/session.ts'),'utf8'),code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
+vm.runInNewContext(code,{module:compiled,exports:compiled.exports,URL});const {sessionCookie,sessionScopeForPath,adminNext}=compiled.exports;let passed=0;
+const test=(name,fn)=>{fn();passed++;console.log('PASS',name);};
+test('customer and admin use different cookie names',()=>assert.notEqual(sessionCookie('customer'),sessionCookie('admin')));
+test('only the admin path segment selects the admin namespace',()=>{for(const p of ['/admin','/admin/login','/admin/phim'])assert.equal(sessionScopeForPath(p),'admin');for(const p of ['/','/administrator','/admin-other','/auth/login'])assert.equal(sessionScopeForPath(p),'customer');});
+test('admin return rejects external origins and malformed paths',()=>{for(const p of ['//evil.example','https://evil.example','/admin\\evil','/admin\n/evil','/tai-khoan/don-ve'])assert.equal(adminNext(p),'/admin/lich-chieu');});
+test('admin login return cannot loop back to the login screen',()=>assert.equal(adminNext('/admin/login?next=/admin'),'/admin/lich-chieu'));
+test('valid admin return keeps its internal path and query',()=>assert.equal(adminNext('/admin/don-ve/42?ticket=1'),'/admin/don-ve/42?ticket=1'));
+console.log(passed+' session routing tests passed.');
