@@ -76,7 +76,7 @@ Cookie phiên có HttpOnly/SameSite và Secure trên bản production; database 
 
 ## Dữ liệu và tài khoản mẫu
 
-Có 6 phim, 7 thể loại, 8 liên kết phim–thể loại, 3 phòng, 3 loại ghế, 234 đơn vị/252 chỗ, lịch từ hôm nay đến 4 ngày sau, mã XYZ10/XYZ20K và 2 phương thức thanh toán. Dòng VNPay Sandbox đang tắt; mô phỏng là phương thức được dùng. Không có tài khoản đăng nhập với mật khẩu cố định. Dòng nhân viên khởi tạo chỉ phục vụ FK của dữ liệu mẫu, có mật khẩu ngẫu nhiên không công bố.
+Có 6 phim, 7 thể loại, 8 liên kết phim–thể loại, 3 phòng, 3 loại ghế, 234 đơn vị/252 chỗ, lịch từ hôm nay đến 4 ngày sau, mã XYZ10/XYZ20K và 2 phương thức thanh toán. Có thể chọn mô phỏng hoặc VNPay Sandbox sau khi cấu hình máy chủ và IPN; xem [hướng dẫn VNPay](../docs/VNPAY-SANDBOX.md). Không có tài khoản đăng nhập với mật khẩu cố định. Dòng nhân viên khởi tạo chỉ phục vụ FK của dữ liệu mẫu, có mật khẩu ngẫu nhiên không công bố.
 
 Đăng ký tài khoản trên website trước. Sau đó sửa email trong `supabase/grant-staff.sql`, chạy trong SQL Editor. Đăng nhập nhân viên tại `/admin/login`, dùng tên đăng nhập đã điền và mật khẩu của tài khoản khách hàng tại thời điểm cấp. Nhân viên và khách hàng có mật khẩu riêng sau khi cấp.
 
@@ -94,3 +94,11 @@ Có 6 phim, 7 thể loại, 8 liên kết phim–thể loại, 3 phòng, 3 loạ
 - `migrations/202611090001_chapter3.sql`: migration cài mới được sinh từ các nguồn trên, không chứa seed.
 
 Sau khi sửa nguồn, chạy `node scripts/build-database.mjs`. Không sửa riêng file install rồi sinh lại vì thay đổi sẽ bị ghi đè. Nâng cấp database đang có dữ liệu về sau phải thêm migration mới; không dùng reset trên dữ liệu cần giữ.
+
+
+## VNPay Sandbox
+
+Database đang dùng: chạy toàn bộ supabase/enable-vnpay.sql để cập nhật giữ dữ liệu; không reset. Trạng thái giao dịch cổng nằm trong cinema_private.vnpay_attempt, các khoản thu đã xác nhận và vé vẫn dùng bảng nghiệp vụ cũ. Xem [hướng dẫn cấu hình và IPN](../docs/VNPAY-SANDBOX.md).
+
+
+Bản sửa xác nhận VNPay: chạy `supabase/fix-vnpay-confirmation.sql` nếu đã bật VNPay bản đầu. Giữ dữ liệu, không reset. Kết quả `vnpay-confirmation-v2`.

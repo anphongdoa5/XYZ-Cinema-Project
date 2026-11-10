@@ -1,0 +1,21 @@
+import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import assert from 'node:assert/strict';import {createHmac,timingSafeEqual,randomUUID} from 'node:crypto';import ts from 'typescript';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+function load(file,dependencies={}){const compiled={exports:{}};const code=ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;new Function('require','module','exports',code)(key=>{if(dependencies[key])return dependencies[key];throw Error(key);},compiled,compiled.exports);return compiled.exports;}
+const crypto={createHmac,timingSafeEqual,randomUUID};const protocol=load('lib/payments/vnpay-protocol.ts',{'node:crypto':crypto});
+const {canonicalQuery,signVnpay,verifyVnpay,vnpayDate}=protocol;
+const p={vnp_TmnCode:'TESTCODE',vnp_TxnRef:'XYZ123',vnp_Amount:'10000000',vnp_ResponseCode:'00',vnp_TransactionStatus:'00',vnp_OrderInfo:'Vé thử + không thu tiền thật'};
+const search=()=>new URLSearchParams(canonicalQuery(p)+'&vnp_SecureHash='+signVnpay(p,'test-secret'));
+assert.equal(verifyVnpay(search(),'test-secret','TESTCODE').vnp_OrderInfo,p.vnp_OrderInfo);
+const changed=search();changed.set('vnp_Amount','1');assert.equal(verifyVnpay(changed,'test-secret','TESTCODE'),null);
+const repeated=search();repeated.append('vnp_Amount','10000000');assert.equal(verifyVnpay(repeated,'test-secret','TESTCODE'),null);
+assert.equal(verifyVnpay(search(),'test-secret','OTHER'),null);assert.equal(verifyVnpay(search(),'wrong-secret','TESTCODE'),null);
+assert.equal(vnpayDate('2026-11-10T19:30:00Z'),'20261111023000');
+const {shortDescription}=load('lib/cinema/text.ts');assert.equal(shortDescription(' Phim hay. '),'Phim hay.');assert.ok(shortDescription('Bò sữa bay ở Mộc Châu. '.repeat(50)).endsWith('…'));assert.ok(Array.from(shortDescription('😀'.repeat(400))).length<=280);
+const {queryRequest,verifyQueryResponse}=load('lib/payments/vnpay-query-protocol.ts',{'node:crypto':crypto,'./vnpay-protocol':protocol});
+const request=queryRequest('XYZ123','2026-11-10T15:52:52Z','TESTCODE','test-secret');assert.equal(request.vnp_TransactionDate,'20261110225252');
+assert.equal(verifyQueryResponse({vnp_ResponseCode:'99',vnp_Message:'Unexpected error'},'test-secret','TESTCODE','XYZ123',100000),null);
+const queryFields=['vnp_ResponseId','vnp_Command','vnp_ResponseCode','vnp_Message','vnp_TmnCode','vnp_TxnRef','vnp_Amount','vnp_BankCode','vnp_PayDate','vnp_TransactionNo','vnp_TransactionType','vnp_TransactionStatus','vnp_OrderInfo','vnp_PromotionCode','vnp_PromotionAmount'];
+const result={vnp_ResponseId:'qa-result',vnp_Command:'querydr',vnp_ResponseCode:'00',vnp_Message:'Success',vnp_TmnCode:'TESTCODE',vnp_TxnRef:'XYZ123',vnp_Amount:'10000000',vnp_BankCode:'NCB',vnp_PayDate:'20261110225300',vnp_TransactionNo:'12345',vnp_TransactionType:'01',vnp_TransactionStatus:'00',vnp_OrderInfo:'Test query'};
+const signedResult={...result,vnp_SecureHash:createHmac('sha512','test-secret').update(queryFields.map(key=>result[key]??'').join('|')).digest('hex')};
+assert.ok(verifyQueryResponse(signedResult,'test-secret','TESTCODE','XYZ123',100000));assert.equal(verifyQueryResponse({...signedResult,vnp_TransactionStatus:'00',vnp_Amount:'1'},'test-secret','TESTCODE','XYZ123',100000),null);
+console.log('Passed VNPay callback/QueryDr signatures, tampering, duplicates, GMT+7 and description tests.');

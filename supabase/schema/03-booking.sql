@@ -8,7 +8,7 @@ begin
  where g.suat_chieu_id=p_show and g.trang_thai='GIU' and g.thoi_gian_giu_den<=now()
  and (g.don_dat_ve_id is null or exists(select 1 from don_dat_ve d where d.don_dat_ve_id=g.don_dat_ve_id and d.trang_thai='HET_HAN'));
 end $$;
--- Thanh toán hiện chỉ mô phỏng; VNPay có danh mục nhưng chưa kích hoạt provider.
+-- Thanh toán mô phỏng được giữ để báo cáo; khóa khi VNPay đang xử lý.
 create function public.cinema_pay(p_order bigint,p_expected numeric) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare o don_dat_ve; p khuyen_mai; discount numeric; why text; outcome text; show_id bigint; method_id integer; seats_count integer;
 begin
@@ -17,7 +17,8 @@ begin
  perform cinema_expire(show_id); select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
  if o.trang_thai='DA_THANH_TOAN' then return jsonb_build_object('paid',true); end if;
  if o.trang_thai<>'CHO_THANH_TOAN' or o.ngay_dat+interval '10 minutes'<=now() then raise exception 'Đơn đã hết hạn hoặc không thể thanh toán.'; end if;
- if not exists(select 1 from cinema_private.cau_hinh where id and simulation_enabled) then raise exception 'Thanh toán mô phỏng đang tắt. VNPay chưa được tích hợp.'; end if;
+ if exists(select 1 from cinema_private.vnpay_attempt where don_dat_ve_id=p_order and (state='review' or (state='pending' and expires_at>now()))) then raise exception 'Đang chờ kết quả VNPay hoặc cần đối soát. Vui lòng kiểm tra đơn trước khi thanh toán lại.'; end if;
+ if not exists(select 1 from cinema_private.cau_hinh where id and simulation_enabled) then raise exception 'Thanh toán mô phỏng đang tắt.'; end if;
  select phuong_thuc_id into method_id from phuong_thuc_thanh_toan where ten_phuong_thuc='Thanh toán mô phỏng' and trang_thai=1;
  if method_id is null then raise exception 'Phương thức mô phỏng chưa sẵn sàng.'; end if;
  select jsonb_array_length(du_lieu->'order_items') into seats_count from cinema_private.don_snapshot where don_dat_ve_id=p_order;
@@ -182,6 +183,9 @@ begin
  if p.ngay_bat_dau>now() then raise exception 'Chương trình chưa bắt đầu.'; end if;
  if p.ngay_ket_thuc<now() then raise exception 'Mã khuyến mãi đã hết hạn.'; end if;
  select count(distinct d.don_dat_ve_id) into used from don_dat_ve d join thanh_toan t using(don_dat_ve_id) where d.khuyen_mai_id=p.khuyen_mai_id and t.loai_giao_dich='THU' and t.trang_thai='THANH_CONG';
+ -- VNPay đã chốt giá: giữ lượt ưu đãi đến khi có kết quả hoặc hết hạn.
+ select used+count(*) into used from cinema_private.vnpay_attempt a join don_dat_ve d using(don_dat_ve_id)
+ where d.khuyen_mai_id=p.khuyen_mai_id and a.state='pending' and a.expires_at>now();
  if p.so_luong_toi_da is not null and used>=p.so_luong_toi_da then raise exception 'Mã khuyến mãi đã hết lượt sử dụng.'; end if;
  if p_subtotal<coalesce(p.dieu_kien_ap_dung,0) then raise exception 'Đơn chưa đạt mức tối thiểu % đồng.',p.dieu_kien_ap_dung; end if;
  discount:=case when p.hinh_thuc_giam='SO_TIEN' then p.gia_tri_giam else floor(p_subtotal*p.gia_tri_giam/100) end;
@@ -195,6 +199,7 @@ begin
  if show_id is null then raise exception 'Không tìm thấy đơn.'; end if;
  perform cinema_expire(show_id); select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
  if o.trang_thai<>'CHO_THANH_TOAN' or o.ngay_dat+interval '10 minutes'<=now() then raise exception 'Đơn không còn trong thời hạn thanh toán.'; end if;
+ if exists(select 1 from cinema_private.vnpay_attempt where don_dat_ve_id=p_order and (state='review' or (state='pending' and expires_at>now()))) then raise exception 'Đang chờ kết quả VNPay hoặc cần đối soát. Vui lòng kiểm tra đơn trước khi thanh toán lại.'; end if;
  if trim(coalesce(p_code,''))<>'' then select * into p from khuyen_mai where ma_khuyen_mai=upper(trim(p_code)); discount:=cinema_promo_discount(p,o.tong_tien_goc); end if;
  update don_dat_ve set khuyen_mai_id=p.khuyen_mai_id,giam_gia=discount,tong_thanh_toan=tong_tien_goc-discount where don_dat_ve_id=p_order;
  update cinema_private.don_snapshot set du_lieu=du_lieu||jsonb_build_object('promotion_code',p.ma_khuyen_mai) where don_dat_ve_id=p_order;

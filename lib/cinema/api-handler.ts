@@ -6,6 +6,8 @@ import { identity,databaseError } from '@/lib/cinema/server';
 import { z } from 'zod';
 import {cinemaId,parseAdminData} from '@/lib/cinema/validation';
 import {sessionCookie,type SessionScope} from './session';
+import {paymentDatabase,paymentUrl,vnpayAvailable,vnpayConfig} from '@/lib/payments/vnpay';
+import {reconcileVnpay} from '@/lib/payments/vnpay-confirm';
 const id=cinemaId;
 const holdId=z.string().uuid();
 const password=z.string().min(8).refine(v=>new TextEncoder().encode(v).length<=72,'Mật khẩu tối đa 72 byte UTF-8.');
@@ -36,6 +38,24 @@ export function createCinemaHandler(scope:SessionScope){const cookieName=session
   const {profile}=await identity(db,scope);
   if(request.method==='GET'&&resource==='me')return reply({profile});
   if(!profile?.active)return reply({error:'Vui lòng đăng nhập để tiếp tục.'},401);
+  if(scope==='customer'&&request.method==='GET'&&resource==='payment-methods')return reply({vnpay:await vnpayAvailable()});
+  if(scope==='customer'&&request.method==='POST'&&resource==='vnpay-check'){
+   const body=await request.json();const orderId=id.parse(body.orderId);
+   // Check ownership with the normal session before using service-only gateway RPCs.
+   const own=await rpc('cinema_orders',{p_order:orderId});
+   if(!own.orders?.length)return reply({error:'Không tìm thấy đơn.'},404);
+   if(own.orders[0].status==='paid')return reply({checked:true,message:'Đơn đã thanh toán.'});
+   return reply(await reconcileVnpay(orderId,profile.id));
+  }
+  if(scope==='customer'&&request.method==='POST'&&resource==='vnpay'){
+   vnpayConfig();
+   const body=await request.json();const {data,error}=await paymentDatabase().rpc('cinema_vnpay_begin',{p_order:id.parse(body.orderId),p_customer:id.parse(profile.id),p_expected:z.number().int().nonnegative().parse(body.expected)});
+   if(error?.code==='PGRST202')return reply({error:'Chạy supabase/enable-vnpay.sql để bật VNPay Sandbox. Thanh toán mô phỏng vẫn sử dụng được.'},503);
+   databaseError(error);
+   if(data?.price_changed||data?.paid)return reply(data);
+   if(!data?.ref)throw Error('Chưa tạo được giao dịch VNPay.');
+   return reply({redirect:paymentUrl(data,request.headers)});
+  }
   if(scope==='admin'&&['hold','release','order','promo','pay','reservation','holds'].includes(resource))return reply({error:'Chức năng này dành cho tài khoản khách hàng.'},403);
   if(request.method==='GET'){
    if(resource==='reservation')return reply(await rpc('cinema_reservation',{p_show:id.parse(key)}));

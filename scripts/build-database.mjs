@@ -6,7 +6,10 @@ const read=file=>fs.readFileSync(path.join(root,file),'utf8').trim();
 const write=(file,text)=>fs.writeFileSync(path.join(root,file),text+'\n');
 const files=fs.readdirSync(path.join(root,'supabase/schema')).filter(name=>/^0[1-6]-.*\.sql$/.test(name)).sort();
 const sources=files.map(file=>read('supabase/schema/'+file));
-const schema=sources.join('\n\n'),seed=read('supabase/schema/07-seed.sql');
+const gateway=read('supabase/schema/08-vnpay.sql');
+const [gatewayTables,gatewayRest]=gateway.split('-- BEGIN RPC');
+const [gatewayRpc,gatewayActivation]=gatewayRest.split('-- BEGIN ACTIVATION');
+const schema=[sources[0],gatewayTables,...sources.slice(1),gatewayRpc].join('\n\n'),seed=read('supabase/schema/07-seed.sql');
 const header='-- XYZ Cinema · Chương 3, Bảng 3.1–3.17.\n-- Sinh bằng node scripts/build-database.mjs; nguồn trong supabase/schema/.\n';
 // Baseline đã phát hành được giữ nguyên; thay đổi dùng migration kế tiếp.
 if(!fs.existsSync(path.join(root,'supabase/migrations/202611090001_chapter3.sql')))write('supabase/migrations/202611090001_chapter3.sql',header+'begin;\n'+schema+'\ncommit;');
@@ -19,7 +22,7 @@ do $$ begin
   raise exception 'Đã có cấu trúc. Dừng cài mới. Nếu đã cài Chương 3, chạy supabase/upgrade.sql; không reset dữ liệu đang dùng.';
  end if;
 end $$;
-`+schema+'\n\n-- DỮ LIỆU MẪU\n'+seed+'\ncommit;\n\n'+read('supabase/verify.sql'));
+`+schema+'\n\n-- DỮ LIỆU MẪU\n'+seed+'\n'+gatewayActivation+'\ncommit;\n\n'+read('supabase/verify.sql'));
 const tables=['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan'];
 const literal=values=>values.map(value=>"'"+value+"'").join(',');
 const functions=[...schema.matchAll(/create function public\.[\s\S]*?\$\$;/g)].map(match=>match[0].replace('create function','create or replace function')).join('\n\n');
@@ -37,7 +40,10 @@ do $$ begin
   raise exception 'Phiên bản database chưa được nhận diện. Dừng cập nhật để kiểm tra.';
  end if;
 end $$;
+${gatewayTables}
 ${functions}
+${gatewayRpc}
+${gatewayActivation}
 
 -- Cập nhật các chính sách đã biết trong một giao dịch; không xóa bảng.
 do $$ declare p record; begin
@@ -83,3 +89,13 @@ select 'weekly-feature-v1' as cap_nhat;
 write('supabase/update-weekly-feature.sql',weeklyFeature);
 if(!fs.existsSync(path.join(root,'supabase/migrations/202611090003_weekly_feature.sql')))write('supabase/migrations/202611090003_weekly_feature.sql',weeklyFeature);
 console.log('Generated install/seed/upgrade; preserved published baseline migration.');
+
+// Nâng cấp VNPay giữ dữ liệu, chỉ thay các hàm đã biết.
+const changed=['cinema_pay','cinema_promo_discount','cinema_promo','cinema_order_json'];
+const gatewayDependencies=[...sources.join('\n').matchAll(/create function public\.(\w+)\([\s\S]*?\$\$;/g)].filter(m=>changed.includes(m[1])).map(m=>m[0].replace('create function','create or replace function')).join('\n\n');
+const vnpay=header+"-- Nâng cấp VNPay Sandbox giữ dữ liệu. Không chạy reset/install trước tệp này.\nbegin;\nset local search_path=public,extensions,pg_temp;\nselect pg_advisory_xact_lock(hashtextextended('xyz_cinema_install',0));\n"+gatewayTables+'\n'+gatewayDependencies+'\n'+gatewayRpc+'\n'+gatewayActivation+"\nnotify pgrst,'reload schema';\ncommit;\nselect 'vnpay-sandbox-v1' as cap_nhat;";
+write('supabase/enable-vnpay.sql',vnpay);
+if(!fs.existsSync(path.join(root,'supabase/migrations/202611100004_vnpay_sandbox.sql')))write('supabase/migrations/202611100004_vnpay_sandbox.sql',vnpay);
+const confirmation=header+"-- Sửa xác nhận VNPay; giữ tài khoản, đơn, ghế, vé và giao dịch. Không reset/cài lại.\nbegin;\nset local search_path=public,extensions,pg_temp;\nselect pg_advisory_xact_lock(hashtextextended('xyz_cinema_install',0));\n"+gatewayTables+'\n'+gatewayRpc+"\nnotify pgrst,'reload schema';\ncommit;\nselect 'vnpay-confirmation-v2' as cap_nhat;";
+write('supabase/fix-vnpay-confirmation.sql',confirmation);
+if(!fs.existsSync(path.join(root,'supabase/migrations/202611100005_vnpay_confirmation.sql')))write('supabase/migrations/202611100005_vnpay_confirmation.sql',confirmation);

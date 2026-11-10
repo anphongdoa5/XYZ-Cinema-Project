@@ -40,6 +40,7 @@ create function public.cinema_order_json(p_order bigint) returns jsonb language 
  'status',case d.trang_thai when 'DA_THANH_TOAN' then 'paid' when 'DA_HUY' then 'cancelled' when 'HET_HAN' then 'expired' else 'pending' end,
  'subtotal',d.tong_tien_goc,'discount',d.giam_gia,'total',d.tong_thanh_toan,'promotion_id',d.khuyen_mai_id::text,'promotion_code',case when x.du_lieu ? 'promotion_code' then x.du_lieu->>'promotion_code' else p.ma_khuyen_mai end,
  'created_at',d.ngay_dat,'expires_at',d.ngay_dat+interval '10 minutes','paid_at',x.ngay_thanh_toan,'cancelled_at',x.ngay_huy,
+ 'vnpay', (select jsonb_build_object('state',a.state,'response_code',a.response_code,'ref',a.ref) from cinema_private.vnpay_attempt a where a.don_dat_ve_id=d.don_dat_ve_id order by a.created_at desc limit 1),
  'tickets',coalesce((select jsonb_agg(jsonb_build_object('id',v.ve_id::text,'seat_id',g.ghe_id::text,'code',v.ma_ve,'qr_token',v.ma_ve,'issued_at',v.thoi_gian_xuat,
    'status',case v.trang_thai when 'HIEU_LUC' then 'valid' when 'DA_SU_DUNG' then 'used' else 'cancelled' end) order by v.ve_id)
    from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where v.don_dat_ve_id=d.don_dat_ve_id),'[]'::jsonb),

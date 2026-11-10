@@ -40,7 +40,7 @@ insert into khuyen_mai(khuyen_mai_id,nhan_vien_id,ma_khuyen_mai,ten_khuyen_mai,h
 (2,1,'XYZ20K','Giảm 20.000 đồng','SO_TIEN',20000,null,200000,now()-interval '1 day',now()+interval '30 days',50) on conflict(khuyen_mai_id) do nothing;
 insert into phuong_thuc_thanh_toan(phuong_thuc_id,ten_phuong_thuc,mo_ta,trang_thai) values
 (1,'Thanh toán mô phỏng','Thử luồng đặt vé khi phát triển; không thu tiền thật.',1),
-(2,'VNPay Sandbox','Dành cho bước tích hợp VNPay Sandbox sau này. Chưa gọi cổng thanh toán.',0) on conflict(phuong_thuc_id) do nothing;
+(2,'VNPay Sandbox','Cổng thanh toán thử nghiệm VNPay 2.1.0',1) on conflict(phuong_thuc_id) do nothing;
 do $$ declare pair text[]; begin
  foreach pair slice 1 in array array[['nhan_vien','nhan_vien_id'],['the_loai','the_loai_id'],['loai_ghe','loai_ghe_id'],['phim','phim_id'],['phong_chieu','phong_chieu_id'],['khuyen_mai','khuyen_mai_id'],['phuong_thuc_thanh_toan','phuong_thuc_id']] loop
   execute format('select setval(pg_get_serial_sequence(%L,%L),greatest(coalesce(max(%I),0),1),true) from public.%I','public.'||pair[1],pair[2],pair[2],pair[1]);
