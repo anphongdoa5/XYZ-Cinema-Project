@@ -1,8 +1,11 @@
 # XYZ Cinema - Hệ thống đặt vé xem phim
 Sinh viên thực hiện: Huỳnh Văn Chí An
-\nMSSV: 030239230001
-\nLớp: DH39CDS02
-\nGVHD: ThS.Nguyễn Thị Tường Vi
+
+MSSV: 030239230001
+
+Lớp: DH39CDS02
+
+GVHD: ThS.Nguyễn Thị Tường Vi
 
 Ứng dụng đồ án dùng Next.js, React, TypeScript và Supabase PostgreSQL bao gồm các chức năng như đặt ghế, khuyến mãi, thanh toán mô phỏng/VNPay Sandbox, vé QR, quản lý rạp và báo cáo.
 
