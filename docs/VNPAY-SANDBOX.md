@@ -2,13 +2,11 @@
 
 Trang thanh toán cho chọn **Thanh toán mô phỏng** hoặc **VNPay**. Hai luồng dùng chung đơn/ghế và báo cáo; Máy chủ phát hành vé sau khi xác minh IPN, kết quả QueryDr hoặc callback có chữ ký hợp lệ trong sandbox localhost. Mô phỏng vẫn dùng được nếu chưa cấu hình VNPay.
 
-## Bật trên database đang dùng
+## Triển khai database
 
-Mở `supabase/enable-vnpay.sql`, sao chép **toàn bộ** vào Supabase SQL Editor rồi Run. Kết quả cuối là `vnpay-sandbox-v1`. Tệp này giữ nguyên tài khoản, đơn, ghế, vé và giao dịch; có thể chạy lại. **Không chạy reset.sql/install.sql** để bật tính năng trên database đã có dữ liệu.
+Chạy toàn bộ **[supabase/deploy.sql](../supabase/deploy.sql)** một lần trong SQL Editor bằng role postgres. Gói đã gồm VNPay Sandbox, bản sửa xác nhận v2, Tâm điểm, dữ liệu mẫu khi cài mới, admin và Cron. Kết quả cuối là **xyz-cinema-deploy-v1**; cột vnpay_confirmation_v2 là true.
 
-Nếu đã chạy bản VNPay đầu tiên, chạy toàn bộ `supabase/fix-vnpay-confirmation.sql` để bật bản sửa `vnpay-confirmation-v2`; không reset/cài lại. Bản sửa bổ sung metadata QueryDr, hạn chế truy vấn và phục hồi đơn trả đúng hạn khi ghế cũ còn trống.
-
-Tệp `supabase/upgrade.sql` cũng chứa cập nhật này. Bản cài mới `install.sql` đã bao gồm VNPay. Không sửa các migration đã phát hành trước ngày 10/11/2026.
+Không cần chạy riêng enable-vnpay.sql hoặc fix-vnpay-confirmation.sql. Các bản vá được giữ làm lịch sử/công cụ bảo trì. Chạy lại deploy.sql trên database Chương 3 được hỗ trợ giữ tài khoản, đơn, ghế, vé, giao dịch và mật khẩu admin. Xem [hướng dẫn triển khai](../HUONG_DAN_CHAY.md).
 
 ## Biến môi trường chỉ ở máy chủ
 
@@ -25,7 +23,7 @@ VNPAY_RETURN_URL=http://localhost:3000/api/payments/vnpay/return
 
 `SUPABASE_SECRET_KEY` lấy tại Supabase → Settings → API Keys → Secret keys. Có thể dùng service_role key cũ trong biến này. Không dùng Publishable/anon key cho RPC xác nhận thanh toán, không thêm tiền tố `NEXT_PUBLIC_` cho các khóa bí mật. Khởi động lại `npm run dev` sau khi sửa `.env.local`.
 
-Đã điền mã website/khóa VNPay từ tài liệu người dùng vào `.env.local` cục bộ. Tài liệu và khóa thật không nằm trong mã nguồn hoặc tệp SQL.
+Mỗi người triển khai điền mã website/khóa VNPay Sandbox được cấp vào `.env.local` của mình. Tài liệu và khóa thật không nằm trong mã nguồn hoặc tệp SQL.
 
 ## Return URL và IPN URL
 

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {buildDeploy} from './build-deploy.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const read=file=>fs.readFileSync(path.join(root,file),'utf8').trim();
 const write=(file,text)=>fs.writeFileSync(path.join(root,file),text+'\n');
@@ -99,3 +100,5 @@ if(!fs.existsSync(path.join(root,'supabase/migrations/202611100004_vnpay_sandbox
 const confirmation=header+"-- Sửa xác nhận VNPay; giữ tài khoản, đơn, ghế, vé và giao dịch. Không reset/cài lại.\nbegin;\nset local search_path=public,extensions,pg_temp;\nselect pg_advisory_xact_lock(hashtextextended('xyz_cinema_install',0));\n"+gatewayTables+'\n'+gatewayRpc+"\nnotify pgrst,'reload schema';\ncommit;\nselect 'vnpay-confirmation-v2' as cap_nhat;";
 write('supabase/fix-vnpay-confirmation.sql',confirmation);
 if(!fs.existsSync(path.join(root,'supabase/migrations/202611100005_vnpay_confirmation.sql')))write('supabase/migrations/202611100005_vnpay_confirmation.sql',confirmation);
+buildDeploy(root);
+console.log('Generated supabase/deploy.sql: one SQL Editor entry point for fresh install or upgrade.');

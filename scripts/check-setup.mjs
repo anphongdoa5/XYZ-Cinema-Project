@@ -26,12 +26,12 @@ try {
   const response = await fetch(`${parsed.origin}/rest/v1/phim?select=phim_id&limit=1000`, { headers: { apikey: key }, signal: AbortSignal.timeout(10000) });
   const data = await response.json();
   if (response.status === 401 || response.status === 403) { console.error('Supabase từ chối khóa hoặc quyền đọc. Kiểm tra đúng project và chạy SQL phân quyền.'); process.exit(1); }
-  if (!response.ok) { console.error('Đã kết nối project nhưng chưa đọc được bảng phim. Chạy supabase/install.sql trong SQL Editor.'); process.exit(1); }
+  if (!response.ok) { console.error('Đã kết nối project nhưng chưa đọc được bảng phim. Chạy supabase/deploy.sql trong SQL Editor.'); process.exit(1); }
   console.log(`Kết nối thành công. Đọc được ${Array.isArray(data) ? data.length : 0} phim.`);
   const versionResponse = await fetch(parsed.origin+'/rest/v1/rpc/cinema_version', { method:'POST', headers:{apikey:key,'Content-Type':'application/json'}, body:'{}', signal:AbortSignal.timeout(10000) });
   const version = await versionResponse.json();
   if (!versionResponse.ok || version !== 'chapter3-audit-v2') {
-    console.error('Database cần cập nhật. Mở supabase/upgrade.sql, Ctrl+A → Ctrl+C; Supabase → SQL Editor → New query → dán toàn bộ → Run. Không chạy reset.sql. Dữ liệu hiện có được giữ nguyên.'); process.exit(1);
+    console.error('Database cần cập nhật. Mở supabase/deploy.sql, Ctrl+A → Ctrl+C; Supabase → SQL Editor → New query → dán toàn bộ → Run. Không chạy reset.sql. Dữ liệu hiện có được giữ nguyên.'); process.exit(1);
   }
   console.log('Phiên bản nghiệp vụ: chapter3-audit-v2.');
   console.log('Tiếp theo: npm.cmd run dev → http://localhost:3000/cai-dat để kiểm tra các danh mục và dữ liệu mẫu.');

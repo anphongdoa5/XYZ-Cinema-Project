@@ -50,7 +50,7 @@ export function createCinemaHandler(scope:SessionScope){const cookieName=session
   if(scope==='customer'&&request.method==='POST'&&resource==='vnpay'){
    vnpayConfig();
    const body=await request.json();const {data,error}=await paymentDatabase().rpc('cinema_vnpay_begin',{p_order:id.parse(body.orderId),p_customer:id.parse(profile.id),p_expected:z.number().int().nonnegative().parse(body.expected)});
-   if(error?.code==='PGRST202')return reply({error:'Chạy supabase/enable-vnpay.sql để bật VNPay Sandbox. Thanh toán mô phỏng vẫn sử dụng được.'},503);
+   if(error?.code==='PGRST202')return reply({error:'Chạy supabase/deploy.sql để cập nhật database và VNPay Sandbox. Thanh toán mô phỏng vẫn sử dụng được.'},503);
    databaseError(error);
    if(data?.price_changed||data?.paid)return reply(data);
    if(!data?.ref)throw Error('Chưa tạo được giao dịch VNPay.');
