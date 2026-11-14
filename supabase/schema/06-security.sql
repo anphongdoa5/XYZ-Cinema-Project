@@ -4,7 +4,7 @@ do $$ declare t text; begin
   execute format('alter table public.%I enable row level security',t);
   execute format('revoke all on public.%I from public,anon,authenticated',t);
   if t not in ('khach_hang','nhan_vien') then execute format('grant select on public.%I to anon,authenticated',t); end if;
-  execute format('create policy staff_read on public.%I for select to anon,authenticated using (public.cinema_staff())',t);
+  execute format('create policy staff_read on public.%I for select to anon,authenticated using (public.cinema_is_admin())',t);
  end loop;
 end $$;
 grant select(khach_hang_id,ho_ten,email,so_dien_thoai,ngay_sinh,gioi_tinh,trang_thai,ngay_tao) on khach_hang to anon,authenticated;

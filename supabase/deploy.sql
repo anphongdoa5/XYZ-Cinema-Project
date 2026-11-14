@@ -1,3 +1,6 @@
+-- XYZ CINEMA - TRIỂN KHAI DATABASE BẰNG MỘT TỆP
+-- Phiên bản: xyz-cinema-v3 - update: 13/11/2026
+-- Supabase SQL Editor → New query → dán toàn bộ file này → Run (role postgres).
 begin;
 set local search_path=public,extensions,pg_temp;
 select pg_advisory_xact_lock(hashtextextended('xyz_cinema_install',0));
@@ -14,7 +17,7 @@ begin
   raise exception 'Phát hiện database XYZ Cinema tiếng Anh cũ. Dừng để giữ dữ liệu; không tự reset hoặc chuyển đổi dữ liệu.';
  end if;
  select count(*) into business_count from pg_class c join pg_namespace n on n.oid=c.relnamespace
- where n.nspname='public' and c.relname=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan']) and c.relkind='r';
+ where n.nspname='public' and c.relname=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan','nhat_ky_hoat_dong']) and c.relkind='r';
  if business_count=0 and to_regnamespace('cinema_private') is null then
   execute $xyz_fresh$
 do $$ begin
@@ -22,7 +25,9 @@ do $$ begin
   raise exception 'Đã có cấu trúc. Dừng cài mới. Nếu đã cài Chương 3, chạy supabase/upgrade.sql; không reset dữ liệu đang dùng.';
  end if;
 end $$;
-
+-- XYZ Cinema: Chương 3, Bảng 3.1–3.17 và BR01–BR20.
+-- PostgreSQL: AUTO_INCREMENT -> IDENTITY; DATETIME -> timestamptz;
+-- TINYINT -> smallint; ENUM -> varchar + CHECK.
 
 create schema cinema_private;
 revoke all on schema cinema_private from public,anon,authenticated;
@@ -214,7 +219,7 @@ create table cinema_private.cau_hinh (
  id boolean primary key default true check(id),
  simulation_enabled boolean not null default true,
  simulation_outcome text not null default 'success' check(simulation_outcome in ('success','failed','timeout')),
- schema_version text not null default 'chapter3-audit-v2',
+ schema_version text not null default 'chapter3-three-roles-v3',
  dummy_password_hash text not null default crypt(gen_random_uuid()::text,gen_salt('bf',12))
 );
 insert into cinema_private.cau_hinh(id) values(true);
@@ -305,7 +310,7 @@ declare result jsonb;
 begin
  select jsonb_build_object('id',k.khach_hang_id::text,'full_name',k.ho_ten,'email',k.email,'phone',k.so_dien_thoai,'active',k.trang_thai=1,'role','customer') into result from khach_hang k where k.khach_hang_id=cinema_customer_id();
  if result is null then
-  select jsonb_build_object('id',n.nhan_vien_id::text,'full_name',n.ho_ten,'email',n.email,'phone',n.so_dien_thoai,'active',n.trang_thai=1,'role','staff') into result from nhan_vien n where n.nhan_vien_id=cinema_staff_id();
+  select jsonb_build_object('id',n.nhan_vien_id::text,'full_name',n.ho_ten,'email',n.email,'phone',n.so_dien_thoai,'active',n.trang_thai=1,'role',case n.vai_tro when 'QUAN_TRI' then 'admin' else 'staff' end) into result from nhan_vien n where n.nhan_vien_id=cinema_staff_id();
  end if;
  return result;
 end $$;
@@ -425,6 +430,7 @@ declare o don_dat_ve; payment thanh_toan;
 begin
  select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
  if o.trang_thai='DA_THANH_TOAN' then
+  if exists(select 1 from ve where don_dat_ve_id=p_order and trang_thai='DA_SU_DUNG') then raise exception 'Không thể hủy đơn có vé đã sử dụng.'; end if;
   select * into payment from thanh_toan where don_dat_ve_id=p_order and loai_giao_dich='THU' and trang_thai='THANH_CONG';
   if payment.thanh_toan_id is null then raise exception 'Không tìm thấy khoản thu để hoàn.'; end if;
   insert into thanh_toan(don_dat_ve_id,phuong_thuc_id,ma_giao_dich,so_tien,trang_thai,loai_giao_dich,giao_dich_goc_id,noi_dung)
@@ -438,7 +444,7 @@ end $$;
 create function public.cinema_cancel(p_order bigint) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare o don_dat_ve; show_id bigint; starts timestamptz;
 begin
- select x.suat_chieu_id into show_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id) where d.don_dat_ve_id=p_order and (d.khach_hang_id=cinema_customer_id() or cinema_staff());
+ select x.suat_chieu_id into show_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id) where d.don_dat_ve_id=p_order and d.khach_hang_id=cinema_customer_id();
  if show_id is null then raise exception 'Không tìm thấy đơn.'; end if;
  perform pg_advisory_xact_lock(hashtextextended('show:'||show_id,0));
  select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
@@ -451,7 +457,7 @@ end $$;
 create function public.cinema_stop_show(p_show bigint,p_expected jsonb) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare impact jsonb; o record;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform cinema_expire(p_show);
  if not exists(select 1 from suat_chieu where suat_chieu_id=p_show) then raise exception 'Không tìm thấy suất chiếu.'; end if;
  select jsonb_build_object('paid',count(*) filter(where d.trang_thai='DA_THANH_TOAN'),'pending',count(*) filter(where d.trang_thai in ('MOI_TAO','CHO_THANH_TOAN')),
@@ -459,6 +465,7 @@ begin
  'tickets',(select count(*) from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=p_show and v.trang_thai<>'DA_HUY'),
  'holds',(select count(distinct ma_luot_giu) from ghe_suat_chieu where suat_chieu_id=p_show and trang_thai='GIU' and don_dat_ve_id is null)) into impact
  from don_dat_ve d join cinema_private.don_snapshot x using(don_dat_ve_id) where x.suat_chieu_id=p_show;
+ if exists(select 1 from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=p_show and v.trang_thai='DA_SU_DUNG') then raise exception 'Không thể hủy suất có vé đã sử dụng.'; end if;
  if p_expected is null or p_expected<>impact then return jsonb_build_object('confirm',true,'impact',impact); end if;
  if not exists(select 1 from cinema_private.don_snapshot where suat_chieu_id=p_show) then
   delete from ghe_suat_chieu where suat_chieu_id=p_show; delete from suat_chieu where suat_chieu_id=p_show;
@@ -634,6 +641,7 @@ create function public.cinema_orders(p_order bigint default null) returns jsonb 
 declare s record; result jsonb;
 begin
  if cinema_customer_id() is null and not cinema_staff() then raise exception 'Vui lòng đăng nhập để tiếp tục.'; end if;
+ if cinema_role()='NHAN_VIEN' and p_order is null then raise exception 'Nhân viên chỉ được tra cứu đơn cụ thể.'; end if;
  for s in select distinct x.suat_chieu_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id)
   where (cinema_staff() or d.khach_hang_id=cinema_customer_id()) and (p_order is null or d.don_dat_ve_id=p_order) and d.trang_thai in ('MOI_TAO','CHO_THANH_TOAN') and d.ngay_dat+interval '10 minutes'<=now() order by x.suat_chieu_id
  loop perform cinema_expire(s.suat_chieu_id); end loop;
@@ -668,7 +676,7 @@ end $$;
 create function public.cinema_admin() returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare result jsonb;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform cinema_expire_all(); result:=cinema_catalog();
  return result||jsonb_build_object('seats',coalesce((select jsonb_agg(cinema_seat_json(ghe_id) order by ghe_id) from ghe),'[]'::jsonb),
  'orders',(cinema_orders()->'orders'),
@@ -689,7 +697,7 @@ create function public.cinema_admin_save(p_entity text,p_data jsonb) returns tex
 declare v_id bigint:=nullif(p_data->>'id','')::bigint; old_movie phim; old_room phong_chieu; old_show suat_chieu; old_promo khuyen_mai;
  movie_row phim; room_id integer; start_time timestamptz; end_time timestamptz; busy boolean; x jsonb; genre text; capacity integer; used integer;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform pg_advisory_xact_lock(hashtextextended('cinema_catalog',0));
  if p_entity='movies' then
   select * into old_movie from phim where phim_id=v_id;
@@ -769,13 +777,218 @@ begin
  return v_id::text;
 end $$;
 
+-- UC13, UC16–UC18. Các vai trò cố định; chỉ bổ sung bảng nhật ký.
+create table if not exists public.nhat_ky_hoat_dong (
+ nhat_ky_id bigint generated by default as identity primary key,
+ nhan_vien_id bigint not null references public.nhan_vien(nhan_vien_id) on delete restrict,
+ thoi_diem timestamptz not null default now(),
+ hanh_dong varchar(50) not null, loai_doi_tuong varchar(50) not null,
+ ma_doi_tuong bigint, ket_qua varchar(12) not null check(ket_qua in ('THANH_CONG','THAT_BAI')),
+ du_lieu jsonb not null default '{}'
+);
+create index if not exists cinema_audit_time on public.nhat_ky_hoat_dong(thoi_diem desc,nhat_ky_id desc);
+create index if not exists cinema_audit_actor on public.nhat_ky_hoat_dong(nhan_vien_id,thoi_diem desc);
+create unique index if not exists cinema_employee_login_ci on public.nhan_vien(lower(ten_dang_nhap));
+create unique index if not exists cinema_employee_email_ci on public.nhan_vien(lower(email));
+
+create or replace function public.cinema_role() returns text language sql stable security definer set search_path=public,extensions,pg_temp as $$
+ select n.vai_tro from nhan_vien n where n.nhan_vien_id=cinema_staff_id()
+$$;
+create or replace function public.cinema_is_admin() returns boolean language sql stable security definer set search_path=public,pg_temp as $$
+ select coalesce(cinema_role()='QUAN_TRI',false)
+$$;
+create or replace function public.cinema_audit(p_action text,p_type text,p_id bigint,p_data jsonb default '{}',p_result text default 'THANH_CONG') returns void language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+ if cinema_staff_id() is null then raise exception 'Không xác định được người thực hiện.'; end if;
+ insert into nhat_ky_hoat_dong(nhan_vien_id,hanh_dong,loai_doi_tuong,ma_doi_tuong,ket_qua,du_lieu)
+ values(cinema_staff_id(),p_action,p_type,p_id,p_result,coalesce(p_data,'{}'));
+end $$;
+create or replace function public.cinema_audit_change() returns trigger language plpgsql security definer set search_path=public,pg_temp as $$
+declare a jsonb; b jsonb; v_id bigint; action text;
+begin
+ if cinema_staff_id() is not null then
+  a:=case when tg_op<>'INSERT' then to_jsonb(old)-'mat_khau' else '{}'::jsonb end;
+  b:=case when tg_op<>'DELETE' then to_jsonb(new)-'mat_khau' else '{}'::jsonb end;
+  v_id:=coalesce((b->>tg_argv[0])::bigint,(a->>tg_argv[0])::bigint);
+  action:=case tg_op when 'INSERT' then 'TAO_' when 'DELETE' then 'XOA_' else 'SUA_' end||upper(tg_argv[1]);
+  if tg_table_name='nhan_vien' and tg_op='UPDATE' then
+   action:=case when a->>'vai_tro' is distinct from b->>'vai_tro' then 'DOI_VAI_TRO'
+    when a->>'trang_thai' is distinct from b->>'trang_thai' then 'KHOA_MO_TAI_KHOAN'
+    when old.mat_khau is distinct from new.mat_khau then 'DOI_MAT_KHAU' else action end;
+  end if;
+  perform cinema_audit(action,upper(tg_argv[1]),v_id,jsonb_build_object('before',a,'after',b,'reason',nullif(current_setting('cinema.audit_reason',true),'')));
+ end if;
+ return coalesce(new,old);
+end $$;
+do $$ declare item text[]; begin
+ foreach item slice 1 in array array[['phim','phim_id','PHIM'],['phong_chieu','phong_chieu_id','PHONG'],['ghe','ghe_id','GHE'],['suat_chieu','suat_chieu_id','SUAT'],['khuyen_mai','khuyen_mai_id','KHUYEN_MAI']] loop
+  execute format('drop trigger if exists cinema_audit_change on public.%I',item[1]);
+  execute format('create trigger cinema_audit_change after insert or update or delete on public.%I for each row execute function public.cinema_audit_change(%L,%L)',item[1],item[2],item[3]);
+ end loop;
+end $$;
+drop trigger if exists cinema_audit_change on public.nhan_vien;
+
+create or replace function public.cinema_guard_admin() returns trigger language plpgsql set search_path=public,pg_temp as $$
+begin
+ perform pg_advisory_xact_lock(hashtextextended('cinema_internal_accounts',0));
+ if old.vai_tro='QUAN_TRI' and old.trang_thai=1 then
+  if tg_op='DELETE' or new.vai_tro<>'QUAN_TRI' or new.trang_thai<>1 then
+   if not exists(select 1 from nhan_vien where vai_tro='QUAN_TRI' and trang_thai=1 and nhan_vien_id<>old.nhan_vien_id) then
+    raise exception 'Phải giữ ít nhất một quản trị viên đang hoạt động.';
+   end if;
+  end if;
+ end if;
+ return coalesce(new,old);
+end $$;
+drop trigger if exists cinema_last_admin on public.nhan_vien;
+create trigger cinema_last_admin before update or delete on public.nhan_vien for each row execute function public.cinema_guard_admin();
+
+create or replace function public.cinema_employee_save(p_data jsonb) returns text language plpgsql security definer set search_path=public,extensions,pg_temp as $$
+declare v_id bigint:=nullif(p_data->>'id','')::bigint; old_row nhan_vien; new_row nhan_vien; pw text:=nullif(p_data->>'password',''); actor_id bigint; action text;
+ role_name text:=p_data->>'role'; status smallint:=case when (p_data->>'active')::boolean then 1 else 0 end;
+begin
+ perform pg_advisory_xact_lock(hashtextextended('cinema_internal_accounts',0));
+ if not cinema_is_admin() then raise exception 'Chỉ quản trị viên được quản lý tài khoản nội bộ.'; end if;
+ actor_id:=cinema_staff_id();
+ select * into old_row from nhan_vien where nhan_vien_id=v_id for update;
+ if v_id is not null and old_row.nhan_vien_id is null then raise exception 'Không tìm thấy tài khoản.'; end if;
+ if role_name not in ('admin','staff') or role_name is null or status is null then raise exception 'Vai trò hoặc trạng thái không hợp lệ.'; end if;
+ if length(trim(p_data->>'full_name')) not between 1 and 100 or coalesce(trim(p_data->>'full_name'),'')='' or
+  coalesce(p_data->>'username','') !~ '^[a-zA-Z0-9_.-]{3,50}$' or length(p_data->>'email')>100 or coalesce(p_data->>'email','') !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' or
+  (nullif(p_data->>'phone','') is not null and p_data->>'phone' !~ '^\+?[0-9]{9,15}$') then raise exception 'Thông tin tài khoản chưa hợp lệ.'; end if;
+ if (v_id is null and pw is null) or (pw is not null and (length(pw)<8 or octet_length(pw)>72)) then raise exception 'Mật khẩu mới cần ít nhất 8 ký tự và tối đa 72 byte UTF-8.'; end if;
+ if length(trim(coalesce(p_data->>'reason',''))) not between 3 and 255 then raise exception 'Vui lòng nhập lý do từ 3 đến 255 ký tự.'; end if;
+ -- Không để tên đăng nhập của người này trùng email đăng nhập của người khác.
+ if exists(select 1 from nhan_vien where nhan_vien_id is distinct from v_id and
+  (lower(ten_dang_nhap) in (lower(trim(p_data->>'username')),lower(trim(p_data->>'email'))) or lower(email) in (lower(trim(p_data->>'username')),lower(trim(p_data->>'email'))))) then raise exception 'Tên đăng nhập hoặc email đã được sử dụng.'; end if;
+ perform set_config('cinema.audit_reason',trim(p_data->>'reason'),true);
+ if v_id is null then
+  insert into nhan_vien(ho_ten,email,so_dien_thoai,vai_tro,ten_dang_nhap,mat_khau,trang_thai)
+  values(trim(p_data->>'full_name'),lower(trim(p_data->>'email')),nullif(trim(p_data->>'phone'),''),case role_name when 'admin' then 'QUAN_TRI' else 'NHAN_VIEN' end,lower(trim(p_data->>'username')),crypt(pw,gen_salt('bf',12)),status) returning nhan_vien_id into v_id;
+ else
+  update nhan_vien set ho_ten=trim(p_data->>'full_name'),email=lower(trim(p_data->>'email')),so_dien_thoai=nullif(trim(p_data->>'phone'),''),
+   ten_dang_nhap=lower(trim(p_data->>'username')),vai_tro=case role_name when 'admin' then 'QUAN_TRI' else 'NHAN_VIEN' end,trang_thai=status,
+   mat_khau=case when pw is null then mat_khau else crypt(pw,gen_salt('bf',12)) end where nhan_vien_id=v_id;
+  if pw is not null or old_row.vai_tro<>(case role_name when 'admin' then 'QUAN_TRI' else 'NHAN_VIEN' end) or old_row.trang_thai<>status then
+   delete from cinema_private.phien_dang_nhap where nhan_vien_id=v_id;
+  end if;
+ end if;
+ select * into new_row from nhan_vien where nhan_vien_id=v_id;
+ action:=case when old_row.nhan_vien_id is null then 'TAO_NHAN_VIEN'
+  when old_row.vai_tro<>new_row.vai_tro then 'DOI_VAI_TRO'
+  when old_row.trang_thai<>new_row.trang_thai then 'KHOA_MO_TAI_KHOAN'
+  when pw is not null then 'DAT_LAI_MAT_KHAU' else 'SUA_NHAN_VIEN' end;
+ -- Giữ người thực hiện ngay cả khi quản trị viên tự khóa tài khoản/thu hồi phiên.
+ insert into nhat_ky_hoat_dong(nhan_vien_id,hanh_dong,loai_doi_tuong,ma_doi_tuong,ket_qua,du_lieu)
+ values(actor_id,action,'NHAN_VIEN',v_id,'THANH_CONG',jsonb_build_object('before',coalesce(to_jsonb(old_row)-'mat_khau','{}'::jsonb),'after',to_jsonb(new_row)-'mat_khau','reason',trim(p_data->>'reason'),'password_reset',pw is not null));
+ return v_id::text;
+end $$;
+create or replace function public.cinema_employees() returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
+begin
+ if not cinema_is_admin() then raise exception 'Chỉ quản trị viên được xem danh sách tài khoản nội bộ.'; end if;
+ return jsonb_build_object('employees',coalesce((select jsonb_agg(jsonb_build_object('id',nhan_vien_id::text,'full_name',ho_ten,'email',email,'phone',so_dien_thoai,'username',ten_dang_nhap,'role',case vai_tro when 'QUAN_TRI' then 'admin' else 'staff' end,'active',trang_thai=1) order by nhan_vien_id) from nhan_vien),'[]'::jsonb));
+end $$;
+create or replace function public.cinema_logs(p_filter jsonb default '{}') returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
+declare f timestamptz; t timestamptz; page_no int:=greatest(1,coalesce((p_filter->>'page')::int,1)); result jsonb;
+begin
+ if not cinema_is_admin() then raise exception 'Chỉ quản trị viên được tra cứu nhật ký.'; end if;
+ f:=nullif(p_filter->>'from','')::date::timestamp at time zone 'Asia/Ho_Chi_Minh';
+ t:=(nullif(p_filter->>'to','')::date+1)::timestamp at time zone 'Asia/Ho_Chi_Minh';
+ if f>=t then raise exception 'Khoảng ngày không hợp lệ.'; end if;
+ with filtered as (select l.*,n.ho_ten from nhat_ky_hoat_dong l join nhan_vien n using(nhan_vien_id)
+  where (f is null or thoi_diem>=f) and (t is null or thoi_diem<t)
+   and (nullif(p_filter->>'actor','') is null or l.nhan_vien_id=(p_filter->>'actor')::bigint)
+   and (nullif(p_filter->>'action','') is null or hanh_dong=p_filter->>'action')
+   and (nullif(p_filter->>'type','') is null or loai_doi_tuong=p_filter->>'type')
+   and (nullif(p_filter->>'object','') is null or ma_doi_tuong=(p_filter->>'object')::bigint)
+   and (nullif(p_filter->>'result','') is null or ket_qua=p_filter->>'result'))
+ select jsonb_build_object('total',(select count(*) from filtered),'page',page_no,'page_size',20,'logs',coalesce((select jsonb_agg(to_jsonb(x) order by x.thoi_diem desc,x.nhat_ky_id desc) from (select * from filtered order by thoi_diem desc,nhat_ky_id desc limit 20 offset (page_no-1)*20) x),'[]'::jsonb)) into result;
+ return result;
+end $$;
+
+create or replace function public.cinema_support_search(p_query text,p_page int default 1) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare result jsonb; q text:=lower(trim(p_query));
+begin
+ if not cinema_staff() then raise exception 'Chỉ tài khoản nội bộ được hỗ trợ đơn vé.'; end if;
+ if length(q) not between 5 and 100 or q is null or p_page<1 or p_page>10000 then raise exception 'Nhập đầy đủ mã đơn, mã vé, email hoặc số điện thoại (ít nhất 5 ký tự).'; end if;
+ with found as (select d.don_dat_ve_id from don_dat_ve d join khach_hang k using(khach_hang_id)
+  where lower(d.ma_don)=q or lower(k.email)=q or k.so_dien_thoai=q or exists(select 1 from ve v where v.don_dat_ve_id=d.don_dat_ve_id and lower(v.ma_ve)=q))
+ select jsonb_build_object('total',(select count(*) from found),'page',p_page,'orders',coalesce((select jsonb_agg(cinema_order_json(x.don_dat_ve_id)) from (select don_dat_ve_id from found order by don_dat_ve_id desc limit 10 offset (p_page-1)*10) x),'[]'::jsonb)) into result;
+ return result;
+end $$;
+create or replace function public.cinema_support_cancel(p_order bigint,p_reason text) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare o don_dat_ve; show_id bigint; starts timestamptz;
+begin
+ if not cinema_staff() then raise exception 'Chỉ tài khoản nội bộ được hủy hộ.'; end if;
+ if length(trim(coalesce(p_reason,''))) not between 3 and 255 then raise exception 'Vui lòng nhập lý do hủy hộ từ 3 đến 255 ký tự.'; end if;
+ select suat_chieu_id into show_id from cinema_private.don_snapshot where don_dat_ve_id=p_order;
+ if show_id is null then raise exception 'Không tìm thấy đơn.'; end if;
+ perform pg_advisory_xact_lock(hashtextextended('show:'||show_id,0));
+ select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
+ if o.trang_thai='DA_HUY' then return jsonb_build_object('cancelled',true,'refund',o.tong_thanh_toan); end if;
+ select thoi_gian_bat_dau into starts from suat_chieu where suat_chieu_id=show_id;
+ if o.trang_thai<>'DA_THANH_TOAN' or starts<now()+interval '2 hours' then raise exception 'Chỉ có thể hủy đơn đã thanh toán khi còn ít nhất 2 giờ trước giờ chiếu.'; end if;
+ perform cinema_cancel_internal(p_order);
+ perform cinema_audit('HUY_HO','DON_DAT_VE',p_order,jsonb_build_object('reason',trim(p_reason),'refund',o.tong_thanh_toan));
+ return jsonb_build_object('cancelled',true,'refund',o.tong_thanh_toan);
+end $$;
+create or replace function public.cinema_operations(p_day date default (now() at time zone 'Asia/Ho_Chi_Minh')::date) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+ if cinema_role() is distinct from 'NHAN_VIEN' then raise exception 'Chức năng vận hành dành cho nhân viên rạp.'; end if;
+ if p_day is null then raise exception 'Chọn ngày cần xem.'; end if;
+ perform cinema_expire_all();
+ return jsonb_build_object('server_now',now(),'shows',coalesce((select jsonb_agg(jsonb_build_object('id',s.suat_chieu_id::text,'title',p.ten_phim,'room',r.ten_phong,'starts_at',s.thoi_gian_bat_dau,'ends_at',s.thoi_gian_ket_thuc,'status',s.trang_thai,
+  'sold',(select count(*) from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=s.suat_chieu_id and v.trang_thai<>'DA_HUY'),
+  'used',(select count(*) from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=s.suat_chieu_id and v.trang_thai='DA_SU_DUNG'),
+  'available',(select count(*) from ghe_suat_chieu g where g.suat_chieu_id=s.suat_chieu_id and g.trang_thai='TRONG')) order by s.thoi_gian_bat_dau) from suat_chieu s join phim p using(phim_id) join phong_chieu r using(phong_chieu_id) where (s.thoi_gian_bat_dau at time zone 'Asia/Ho_Chi_Minh')::date=p_day),'[]'::jsonb));
+end $$;
+create or replace function public.cinema_check_in(p_show bigint,p_code text,p_confirm boolean default false) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare v ve; g ghe_suat_chieu; s suat_chieu; d don_dat_ve; why text; info jsonb;
+begin
+ if cinema_role() is distinct from 'NHAN_VIEN' then raise exception 'Chỉ nhân viên rạp được kiểm soát vé.'; end if;
+ if p_confirm is null or p_show is null or length(coalesce(p_code,'')) not between 1 and 20 then raise exception 'Chọn suất và nhập đúng mã vé.'; end if;
+ -- Cùng thứ tự khóa với hủy/thu: suất → đơn → vé. Không nhả ghế khi dùng vé.
+ perform pg_advisory_xact_lock(hashtextextended('show:'||p_show,0));
+ select * into v from ve where ma_ve=upper(trim(p_code));
+ if v.ve_id is null then why:='Không tìm thấy mã vé.';
+ else
+  select * into d from don_dat_ve where don_dat_ve_id=v.don_dat_ve_id for update;
+  select * into v from ve where ve_id=v.ve_id for update;
+  select * into g from ghe_suat_chieu where ghe_suat_chieu_id=v.ghe_suat_chieu_id;
+  select * into s from suat_chieu where suat_chieu_id=g.suat_chieu_id;
+  if s.suat_chieu_id<>p_show then why:='Vé không thuộc suất đã chọn.';
+  elsif v.trang_thai='DA_SU_DUNG' then why:='Vé đã được sử dụng.';
+  elsif v.trang_thai<>'HIEU_LUC' or d.trang_thai<>'DA_THANH_TOAN' or s.trang_thai='DA_HUY' or g.trang_thai<>'DA_BAN' or g.don_dat_ve_id<>d.don_dat_ve_id or g.gia_ban<>v.gia_ve then why:='Vé không còn hiệu lực hoặc không thuộc đơn đã thanh toán.';
+  elsif now()<s.thoi_gian_bat_dau-interval '30 minutes' or now()>=s.thoi_gian_ket_thuc then why:='Ngoài thời gian kiểm soát: từ 30 phút trước giờ chiếu đến trước giờ kết thúc.'; end if;
+ end if;
+ if why is not null then
+  if p_confirm then perform cinema_audit('KIEM_SOAT_VE','VE',v.ve_id,jsonb_build_object('show_id',p_show,'reason',why),'THAT_BAI'); end if;
+  return jsonb_build_object('eligible',false,'confirmed',false,'reason',why);
+ end if;
+ select jsonb_build_object('code',v.ma_ve,'order_code',d.ma_don,'title',p.ten_phim,'room',r.ten_phong,'starts_at',s.thoi_gian_bat_dau,'seat',concat(h.hang_ghe,lpad(h.so_ghe::text,2,'0')),'status',v.trang_thai) into info from phim p,phong_chieu r,ghe h where p.phim_id=s.phim_id and r.phong_chieu_id=s.phong_chieu_id and h.ghe_id=g.ghe_id;
+ if p_confirm then
+  update ve set trang_thai='DA_SU_DUNG' where ve_id=v.ve_id and trang_thai='HIEU_LUC';
+  perform cinema_audit('KIEM_SOAT_VE','VE',v.ve_id,jsonb_build_object('show_id',p_show,'code',v.ma_ve,'order_id',d.don_dat_ve_id));
+ end if;
+ return jsonb_build_object('eligible',true,'confirmed',p_confirm,'ticket',info,'server_now',now());
+end $$;
+
+-- Cấp đúng quyền; không mở helper/trigger cho RPC công khai.
+alter table public.nhat_ky_hoat_dong enable row level security;
+revoke all on public.nhat_ky_hoat_dong from public,anon,authenticated;
+do $$ declare f record; begin
+ for f in select oid::regprocedure sig from pg_proc where pronamespace='public'::regnamespace and proname in ('cinema_role','cinema_is_admin','cinema_audit','cinema_audit_change','cinema_guard_admin','cinema_employee_save','cinema_employees','cinema_logs','cinema_support_search','cinema_support_cancel','cinema_operations','cinema_check_in') loop execute format('revoke all on function %s from public,anon,authenticated',f.sig); end loop;
+end $$;
+grant execute on function cinema_role(),cinema_is_admin(),cinema_employee_save(jsonb),cinema_employees(),cinema_logs(jsonb),cinema_support_search(text,int),cinema_support_cancel(bigint,text),cinema_operations(date),cinema_check_in(bigint,text,boolean) to anon,authenticated;
+update cinema_private.cau_hinh set schema_version='chapter3-three-roles-v3' where id;
+
 -- RLS trên đủ 15 bảng. Không cấp quyền ghi trực tiếp cho trình duyệt.
 do $$ declare t text; begin
  foreach t in array array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan'] loop
   execute format('alter table public.%I enable row level security',t);
   execute format('revoke all on public.%I from public,anon,authenticated',t);
   if t not in ('khach_hang','nhan_vien') then execute format('grant select on public.%I to anon,authenticated',t); end if;
-  execute format('create policy staff_read on public.%I for select to anon,authenticated using (public.cinema_staff())',t);
+  execute format('create policy staff_read on public.%I for select to anon,authenticated using (public.cinema_is_admin())',t);
  end loop;
 end $$;
 grant select(khach_hang_id,ho_ten,email,so_dien_thoai,ngay_sinh,gioi_tinh,trang_thai,ngay_tao) on khach_hang to anon,authenticated;
@@ -932,9 +1145,13 @@ grant execute on function cinema_vnpay_begin(bigint,bigint,numeric),cinema_vnpay
 
 
 -- DỮ LIỆU MẪU
--- Dữ liệu mẫu theo 15 bảng Chương 3; không tạo tài khoản Auth/mật khẩu mẫu.
+-- Dữ liệu mẫu. Không tạo tài khoản khách hàng. Mật khẩu được băm bcrypt.
 insert into nhan_vien(nhan_vien_id,ho_ten,email,vai_tro,ten_dang_nhap,mat_khau)
-values(1,'Nhân viên khởi tạo dữ liệu','seed@xyz-cinema.invalid','NHAN_VIEN','du_lieu_mau',crypt(encode(gen_random_bytes(32),'hex'),gen_salt('bf',12))) on conflict(nhan_vien_id) do nothing;
+values(1,'Quản trị viên demo','admin@xyz-cinema.test','QUAN_TRI','admin',crypt('admin',gen_salt('bf',12))) on conflict do nothing;
+select setval(pg_get_serial_sequence('public.nhan_vien','nhan_vien_id'),greatest((select max(nhan_vien_id) from nhan_vien),1),true);
+insert into nhan_vien(ho_ten,email,so_dien_thoai,vai_tro,ten_dang_nhap,mat_khau)
+select 'Nhân viên '||lpad(i::text,2,'0'),'nv'||lpad(i::text,2,'0')||'@xyz-cinema.test','090000000'||i,'NHAN_VIEN','nv'||lpad(i::text,2,'0'),crypt('Nhanvien123!',gen_salt('bf',12))
+from generate_series(1,5) i on conflict do nothing;
 insert into the_loai(the_loai_id,ten_the_loai) values
 (1,'Khoa học viễn tưởng'),(2,'Tình cảm'),(3,'Gia đình'),(4,'Bí ẩn'),(5,'Giật gân'),(6,'Phiêu lưu'),(7,'Hành động') on conflict(the_loai_id) do nothing;
 insert into loai_ghe(loai_ghe_id,ten_loai_ghe,he_so_gia,mo_ta) values
@@ -986,15 +1203,15 @@ select 'VNPay Sandbox','Cổng thanh toán thử nghiệm VNPay 2.1.0',1 where n
 update phuong_thuc_thanh_toan set trang_thai=1,mo_ta='Cổng thanh toán thử nghiệm VNPay 2.1.0' where ten_phuong_thuc='VNPay Sandbox';
 $xyz_fresh$;
   raise notice 'XYZ Cinema: đã cài mới cấu trúc, tính năng và dữ liệu mẫu.';
- elsif business_count=15 and to_regclass('cinema_private.cau_hinh') is not null then
+ elsif business_count in (15,16) and to_regclass('cinema_private.cau_hinh') is not null then
   execute $xyz_upgrade$
 set local search_path=public,extensions,pg_temp;
 do $$ begin
  perform pg_advisory_xact_lock(hashtextextended('xyz_cinema_install',0));
- if (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan']) and c.relkind='r')<>15 or to_regclass('cinema_private.cau_hinh') is null then
+ if (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan','nhat_ky_hoat_dong']) and c.relkind='r')not in (15,16) or to_regclass('cinema_private.cau_hinh') is null then
   raise exception 'Chưa có đủ cấu trúc Chương 3. Dừng cập nhật, không thay đổi dữ liệu. Xem supabase/README.md.';
  end if;
- if not exists(select 1 from cinema_private.cau_hinh where id and schema_version in ('chapter3-custom-auth-v1','chapter3-audit-v2')) then
+ if not exists(select 1 from cinema_private.cau_hinh where id and schema_version in ('chapter3-custom-auth-v1','chapter3-audit-v2','chapter3-three-roles-v3')) then
   raise exception 'Phiên bản database chưa được nhận diện. Dừng cập nhật để kiểm tra.';
  end if;
 end $$;
@@ -1014,6 +1231,210 @@ create index if not exists cinema_vnpay_order on cinema_private.vnpay_attempt(do
 revoke all on cinema_private.vnpay_attempt from public,anon,authenticated;
 
 
+-- UC13, UC16–UC18. Các vai trò cố định; chỉ bổ sung bảng nhật ký.
+create table if not exists public.nhat_ky_hoat_dong (
+ nhat_ky_id bigint generated by default as identity primary key,
+ nhan_vien_id bigint not null references public.nhan_vien(nhan_vien_id) on delete restrict,
+ thoi_diem timestamptz not null default now(),
+ hanh_dong varchar(50) not null, loai_doi_tuong varchar(50) not null,
+ ma_doi_tuong bigint, ket_qua varchar(12) not null check(ket_qua in ('THANH_CONG','THAT_BAI')),
+ du_lieu jsonb not null default '{}'
+);
+create index if not exists cinema_audit_time on public.nhat_ky_hoat_dong(thoi_diem desc,nhat_ky_id desc);
+create index if not exists cinema_audit_actor on public.nhat_ky_hoat_dong(nhan_vien_id,thoi_diem desc);
+create unique index if not exists cinema_employee_login_ci on public.nhan_vien(lower(ten_dang_nhap));
+create unique index if not exists cinema_employee_email_ci on public.nhan_vien(lower(email));
+
+create or replace function public.cinema_role() returns text language sql stable security definer set search_path=public,extensions,pg_temp as $$
+ select n.vai_tro from nhan_vien n where n.nhan_vien_id=cinema_staff_id()
+$$;
+create or replace function public.cinema_is_admin() returns boolean language sql stable security definer set search_path=public,pg_temp as $$
+ select coalesce(cinema_role()='QUAN_TRI',false)
+$$;
+create or replace function public.cinema_audit(p_action text,p_type text,p_id bigint,p_data jsonb default '{}',p_result text default 'THANH_CONG') returns void language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+ if cinema_staff_id() is null then raise exception 'Không xác định được người thực hiện.'; end if;
+ insert into nhat_ky_hoat_dong(nhan_vien_id,hanh_dong,loai_doi_tuong,ma_doi_tuong,ket_qua,du_lieu)
+ values(cinema_staff_id(),p_action,p_type,p_id,p_result,coalesce(p_data,'{}'));
+end $$;
+create or replace function public.cinema_audit_change() returns trigger language plpgsql security definer set search_path=public,pg_temp as $$
+declare a jsonb; b jsonb; v_id bigint; action text;
+begin
+ if cinema_staff_id() is not null then
+  a:=case when tg_op<>'INSERT' then to_jsonb(old)-'mat_khau' else '{}'::jsonb end;
+  b:=case when tg_op<>'DELETE' then to_jsonb(new)-'mat_khau' else '{}'::jsonb end;
+  v_id:=coalesce((b->>tg_argv[0])::bigint,(a->>tg_argv[0])::bigint);
+  action:=case tg_op when 'INSERT' then 'TAO_' when 'DELETE' then 'XOA_' else 'SUA_' end||upper(tg_argv[1]);
+  if tg_table_name='nhan_vien' and tg_op='UPDATE' then
+   action:=case when a->>'vai_tro' is distinct from b->>'vai_tro' then 'DOI_VAI_TRO'
+    when a->>'trang_thai' is distinct from b->>'trang_thai' then 'KHOA_MO_TAI_KHOAN'
+    when old.mat_khau is distinct from new.mat_khau then 'DOI_MAT_KHAU' else action end;
+  end if;
+  perform cinema_audit(action,upper(tg_argv[1]),v_id,jsonb_build_object('before',a,'after',b,'reason',nullif(current_setting('cinema.audit_reason',true),'')));
+ end if;
+ return coalesce(new,old);
+end $$;
+do $$ declare item text[]; begin
+ foreach item slice 1 in array array[['phim','phim_id','PHIM'],['phong_chieu','phong_chieu_id','PHONG'],['ghe','ghe_id','GHE'],['suat_chieu','suat_chieu_id','SUAT'],['khuyen_mai','khuyen_mai_id','KHUYEN_MAI']] loop
+  execute format('drop trigger if exists cinema_audit_change on public.%I',item[1]);
+  execute format('create trigger cinema_audit_change after insert or update or delete on public.%I for each row execute function public.cinema_audit_change(%L,%L)',item[1],item[2],item[3]);
+ end loop;
+end $$;
+drop trigger if exists cinema_audit_change on public.nhan_vien;
+
+create or replace function public.cinema_guard_admin() returns trigger language plpgsql set search_path=public,pg_temp as $$
+begin
+ perform pg_advisory_xact_lock(hashtextextended('cinema_internal_accounts',0));
+ if old.vai_tro='QUAN_TRI' and old.trang_thai=1 then
+  if tg_op='DELETE' or new.vai_tro<>'QUAN_TRI' or new.trang_thai<>1 then
+   if not exists(select 1 from nhan_vien where vai_tro='QUAN_TRI' and trang_thai=1 and nhan_vien_id<>old.nhan_vien_id) then
+    raise exception 'Phải giữ ít nhất một quản trị viên đang hoạt động.';
+   end if;
+  end if;
+ end if;
+ return coalesce(new,old);
+end $$;
+drop trigger if exists cinema_last_admin on public.nhan_vien;
+create trigger cinema_last_admin before update or delete on public.nhan_vien for each row execute function public.cinema_guard_admin();
+
+create or replace function public.cinema_employee_save(p_data jsonb) returns text language plpgsql security definer set search_path=public,extensions,pg_temp as $$
+declare v_id bigint:=nullif(p_data->>'id','')::bigint; old_row nhan_vien; new_row nhan_vien; pw text:=nullif(p_data->>'password',''); actor_id bigint; action text;
+ role_name text:=p_data->>'role'; status smallint:=case when (p_data->>'active')::boolean then 1 else 0 end;
+begin
+ perform pg_advisory_xact_lock(hashtextextended('cinema_internal_accounts',0));
+ if not cinema_is_admin() then raise exception 'Chỉ quản trị viên được quản lý tài khoản nội bộ.'; end if;
+ actor_id:=cinema_staff_id();
+ select * into old_row from nhan_vien where nhan_vien_id=v_id for update;
+ if v_id is not null and old_row.nhan_vien_id is null then raise exception 'Không tìm thấy tài khoản.'; end if;
+ if role_name not in ('admin','staff') or role_name is null or status is null then raise exception 'Vai trò hoặc trạng thái không hợp lệ.'; end if;
+ if length(trim(p_data->>'full_name')) not between 1 and 100 or coalesce(trim(p_data->>'full_name'),'')='' or
+  coalesce(p_data->>'username','') !~ '^[a-zA-Z0-9_.-]{3,50}$' or length(p_data->>'email')>100 or coalesce(p_data->>'email','') !~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' or
+  (nullif(p_data->>'phone','') is not null and p_data->>'phone' !~ '^\+?[0-9]{9,15}$') then raise exception 'Thông tin tài khoản chưa hợp lệ.'; end if;
+ if (v_id is null and pw is null) or (pw is not null and (length(pw)<8 or octet_length(pw)>72)) then raise exception 'Mật khẩu mới cần ít nhất 8 ký tự và tối đa 72 byte UTF-8.'; end if;
+ if length(trim(coalesce(p_data->>'reason',''))) not between 3 and 255 then raise exception 'Vui lòng nhập lý do từ 3 đến 255 ký tự.'; end if;
+ -- Không để tên đăng nhập của người này trùng email đăng nhập của người khác.
+ if exists(select 1 from nhan_vien where nhan_vien_id is distinct from v_id and
+  (lower(ten_dang_nhap) in (lower(trim(p_data->>'username')),lower(trim(p_data->>'email'))) or lower(email) in (lower(trim(p_data->>'username')),lower(trim(p_data->>'email'))))) then raise exception 'Tên đăng nhập hoặc email đã được sử dụng.'; end if;
+ perform set_config('cinema.audit_reason',trim(p_data->>'reason'),true);
+ if v_id is null then
+  insert into nhan_vien(ho_ten,email,so_dien_thoai,vai_tro,ten_dang_nhap,mat_khau,trang_thai)
+  values(trim(p_data->>'full_name'),lower(trim(p_data->>'email')),nullif(trim(p_data->>'phone'),''),case role_name when 'admin' then 'QUAN_TRI' else 'NHAN_VIEN' end,lower(trim(p_data->>'username')),crypt(pw,gen_salt('bf',12)),status) returning nhan_vien_id into v_id;
+ else
+  update nhan_vien set ho_ten=trim(p_data->>'full_name'),email=lower(trim(p_data->>'email')),so_dien_thoai=nullif(trim(p_data->>'phone'),''),
+   ten_dang_nhap=lower(trim(p_data->>'username')),vai_tro=case role_name when 'admin' then 'QUAN_TRI' else 'NHAN_VIEN' end,trang_thai=status,
+   mat_khau=case when pw is null then mat_khau else crypt(pw,gen_salt('bf',12)) end where nhan_vien_id=v_id;
+  if pw is not null or old_row.vai_tro<>(case role_name when 'admin' then 'QUAN_TRI' else 'NHAN_VIEN' end) or old_row.trang_thai<>status then
+   delete from cinema_private.phien_dang_nhap where nhan_vien_id=v_id;
+  end if;
+ end if;
+ select * into new_row from nhan_vien where nhan_vien_id=v_id;
+ action:=case when old_row.nhan_vien_id is null then 'TAO_NHAN_VIEN'
+  when old_row.vai_tro<>new_row.vai_tro then 'DOI_VAI_TRO'
+  when old_row.trang_thai<>new_row.trang_thai then 'KHOA_MO_TAI_KHOAN'
+  when pw is not null then 'DAT_LAI_MAT_KHAU' else 'SUA_NHAN_VIEN' end;
+ -- Giữ người thực hiện ngay cả khi quản trị viên tự khóa tài khoản/thu hồi phiên.
+ insert into nhat_ky_hoat_dong(nhan_vien_id,hanh_dong,loai_doi_tuong,ma_doi_tuong,ket_qua,du_lieu)
+ values(actor_id,action,'NHAN_VIEN',v_id,'THANH_CONG',jsonb_build_object('before',coalesce(to_jsonb(old_row)-'mat_khau','{}'::jsonb),'after',to_jsonb(new_row)-'mat_khau','reason',trim(p_data->>'reason'),'password_reset',pw is not null));
+ return v_id::text;
+end $$;
+create or replace function public.cinema_employees() returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
+begin
+ if not cinema_is_admin() then raise exception 'Chỉ quản trị viên được xem danh sách tài khoản nội bộ.'; end if;
+ return jsonb_build_object('employees',coalesce((select jsonb_agg(jsonb_build_object('id',nhan_vien_id::text,'full_name',ho_ten,'email',email,'phone',so_dien_thoai,'username',ten_dang_nhap,'role',case vai_tro when 'QUAN_TRI' then 'admin' else 'staff' end,'active',trang_thai=1) order by nhan_vien_id) from nhan_vien),'[]'::jsonb));
+end $$;
+create or replace function public.cinema_logs(p_filter jsonb default '{}') returns jsonb language plpgsql stable security definer set search_path=public,pg_temp as $$
+declare f timestamptz; t timestamptz; page_no int:=greatest(1,coalesce((p_filter->>'page')::int,1)); result jsonb;
+begin
+ if not cinema_is_admin() then raise exception 'Chỉ quản trị viên được tra cứu nhật ký.'; end if;
+ f:=nullif(p_filter->>'from','')::date::timestamp at time zone 'Asia/Ho_Chi_Minh';
+ t:=(nullif(p_filter->>'to','')::date+1)::timestamp at time zone 'Asia/Ho_Chi_Minh';
+ if f>=t then raise exception 'Khoảng ngày không hợp lệ.'; end if;
+ with filtered as (select l.*,n.ho_ten from nhat_ky_hoat_dong l join nhan_vien n using(nhan_vien_id)
+  where (f is null or thoi_diem>=f) and (t is null or thoi_diem<t)
+   and (nullif(p_filter->>'actor','') is null or l.nhan_vien_id=(p_filter->>'actor')::bigint)
+   and (nullif(p_filter->>'action','') is null or hanh_dong=p_filter->>'action')
+   and (nullif(p_filter->>'type','') is null or loai_doi_tuong=p_filter->>'type')
+   and (nullif(p_filter->>'object','') is null or ma_doi_tuong=(p_filter->>'object')::bigint)
+   and (nullif(p_filter->>'result','') is null or ket_qua=p_filter->>'result'))
+ select jsonb_build_object('total',(select count(*) from filtered),'page',page_no,'page_size',20,'logs',coalesce((select jsonb_agg(to_jsonb(x) order by x.thoi_diem desc,x.nhat_ky_id desc) from (select * from filtered order by thoi_diem desc,nhat_ky_id desc limit 20 offset (page_no-1)*20) x),'[]'::jsonb)) into result;
+ return result;
+end $$;
+
+create or replace function public.cinema_support_search(p_query text,p_page int default 1) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare result jsonb; q text:=lower(trim(p_query));
+begin
+ if not cinema_staff() then raise exception 'Chỉ tài khoản nội bộ được hỗ trợ đơn vé.'; end if;
+ if length(q) not between 5 and 100 or q is null or p_page<1 or p_page>10000 then raise exception 'Nhập đầy đủ mã đơn, mã vé, email hoặc số điện thoại (ít nhất 5 ký tự).'; end if;
+ with found as (select d.don_dat_ve_id from don_dat_ve d join khach_hang k using(khach_hang_id)
+  where lower(d.ma_don)=q or lower(k.email)=q or k.so_dien_thoai=q or exists(select 1 from ve v where v.don_dat_ve_id=d.don_dat_ve_id and lower(v.ma_ve)=q))
+ select jsonb_build_object('total',(select count(*) from found),'page',p_page,'orders',coalesce((select jsonb_agg(cinema_order_json(x.don_dat_ve_id)) from (select don_dat_ve_id from found order by don_dat_ve_id desc limit 10 offset (p_page-1)*10) x),'[]'::jsonb)) into result;
+ return result;
+end $$;
+create or replace function public.cinema_support_cancel(p_order bigint,p_reason text) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare o don_dat_ve; show_id bigint; starts timestamptz;
+begin
+ if not cinema_staff() then raise exception 'Chỉ tài khoản nội bộ được hủy hộ.'; end if;
+ if length(trim(coalesce(p_reason,''))) not between 3 and 255 then raise exception 'Vui lòng nhập lý do hủy hộ từ 3 đến 255 ký tự.'; end if;
+ select suat_chieu_id into show_id from cinema_private.don_snapshot where don_dat_ve_id=p_order;
+ if show_id is null then raise exception 'Không tìm thấy đơn.'; end if;
+ perform pg_advisory_xact_lock(hashtextextended('show:'||show_id,0));
+ select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
+ if o.trang_thai='DA_HUY' then return jsonb_build_object('cancelled',true,'refund',o.tong_thanh_toan); end if;
+ select thoi_gian_bat_dau into starts from suat_chieu where suat_chieu_id=show_id;
+ if o.trang_thai<>'DA_THANH_TOAN' or starts<now()+interval '2 hours' then raise exception 'Chỉ có thể hủy đơn đã thanh toán khi còn ít nhất 2 giờ trước giờ chiếu.'; end if;
+ perform cinema_cancel_internal(p_order);
+ perform cinema_audit('HUY_HO','DON_DAT_VE',p_order,jsonb_build_object('reason',trim(p_reason),'refund',o.tong_thanh_toan));
+ return jsonb_build_object('cancelled',true,'refund',o.tong_thanh_toan);
+end $$;
+create or replace function public.cinema_operations(p_day date default (now() at time zone 'Asia/Ho_Chi_Minh')::date) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+ if cinema_role() is distinct from 'NHAN_VIEN' then raise exception 'Chức năng vận hành dành cho nhân viên rạp.'; end if;
+ if p_day is null then raise exception 'Chọn ngày cần xem.'; end if;
+ perform cinema_expire_all();
+ return jsonb_build_object('server_now',now(),'shows',coalesce((select jsonb_agg(jsonb_build_object('id',s.suat_chieu_id::text,'title',p.ten_phim,'room',r.ten_phong,'starts_at',s.thoi_gian_bat_dau,'ends_at',s.thoi_gian_ket_thuc,'status',s.trang_thai,
+  'sold',(select count(*) from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=s.suat_chieu_id and v.trang_thai<>'DA_HUY'),
+  'used',(select count(*) from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=s.suat_chieu_id and v.trang_thai='DA_SU_DUNG'),
+  'available',(select count(*) from ghe_suat_chieu g where g.suat_chieu_id=s.suat_chieu_id and g.trang_thai='TRONG')) order by s.thoi_gian_bat_dau) from suat_chieu s join phim p using(phim_id) join phong_chieu r using(phong_chieu_id) where (s.thoi_gian_bat_dau at time zone 'Asia/Ho_Chi_Minh')::date=p_day),'[]'::jsonb));
+end $$;
+create or replace function public.cinema_check_in(p_show bigint,p_code text,p_confirm boolean default false) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare v ve; g ghe_suat_chieu; s suat_chieu; d don_dat_ve; why text; info jsonb;
+begin
+ if cinema_role() is distinct from 'NHAN_VIEN' then raise exception 'Chỉ nhân viên rạp được kiểm soát vé.'; end if;
+ if p_confirm is null or p_show is null or length(coalesce(p_code,'')) not between 1 and 20 then raise exception 'Chọn suất và nhập đúng mã vé.'; end if;
+ -- Cùng thứ tự khóa với hủy/thu: suất → đơn → vé. Không nhả ghế khi dùng vé.
+ perform pg_advisory_xact_lock(hashtextextended('show:'||p_show,0));
+ select * into v from ve where ma_ve=upper(trim(p_code));
+ if v.ve_id is null then why:='Không tìm thấy mã vé.';
+ else
+  select * into d from don_dat_ve where don_dat_ve_id=v.don_dat_ve_id for update;
+  select * into v from ve where ve_id=v.ve_id for update;
+  select * into g from ghe_suat_chieu where ghe_suat_chieu_id=v.ghe_suat_chieu_id;
+  select * into s from suat_chieu where suat_chieu_id=g.suat_chieu_id;
+  if s.suat_chieu_id<>p_show then why:='Vé không thuộc suất đã chọn.';
+  elsif v.trang_thai='DA_SU_DUNG' then why:='Vé đã được sử dụng.';
+  elsif v.trang_thai<>'HIEU_LUC' or d.trang_thai<>'DA_THANH_TOAN' or s.trang_thai='DA_HUY' or g.trang_thai<>'DA_BAN' or g.don_dat_ve_id<>d.don_dat_ve_id or g.gia_ban<>v.gia_ve then why:='Vé không còn hiệu lực hoặc không thuộc đơn đã thanh toán.';
+  elsif now()<s.thoi_gian_bat_dau-interval '30 minutes' or now()>=s.thoi_gian_ket_thuc then why:='Ngoài thời gian kiểm soát: từ 30 phút trước giờ chiếu đến trước giờ kết thúc.'; end if;
+ end if;
+ if why is not null then
+  if p_confirm then perform cinema_audit('KIEM_SOAT_VE','VE',v.ve_id,jsonb_build_object('show_id',p_show,'reason',why),'THAT_BAI'); end if;
+  return jsonb_build_object('eligible',false,'confirmed',false,'reason',why);
+ end if;
+ select jsonb_build_object('code',v.ma_ve,'order_code',d.ma_don,'title',p.ten_phim,'room',r.ten_phong,'starts_at',s.thoi_gian_bat_dau,'seat',concat(h.hang_ghe,lpad(h.so_ghe::text,2,'0')),'status',v.trang_thai) into info from phim p,phong_chieu r,ghe h where p.phim_id=s.phim_id and r.phong_chieu_id=s.phong_chieu_id and h.ghe_id=g.ghe_id;
+ if p_confirm then
+  update ve set trang_thai='DA_SU_DUNG' where ve_id=v.ve_id and trang_thai='HIEU_LUC';
+  perform cinema_audit('KIEM_SOAT_VE','VE',v.ve_id,jsonb_build_object('show_id',p_show,'code',v.ma_ve,'order_id',d.don_dat_ve_id));
+ end if;
+ return jsonb_build_object('eligible',true,'confirmed',p_confirm,'ticket',info,'server_now',now());
+end $$;
+
+-- Cấp đúng quyền; không mở helper/trigger cho RPC công khai.
+alter table public.nhat_ky_hoat_dong enable row level security;
+revoke all on public.nhat_ky_hoat_dong from public,anon,authenticated;
+do $$ declare f record; begin
+ for f in select oid::regprocedure sig from pg_proc where pronamespace='public'::regnamespace and proname in ('cinema_role','cinema_is_admin','cinema_audit','cinema_audit_change','cinema_guard_admin','cinema_employee_save','cinema_employees','cinema_logs','cinema_support_search','cinema_support_cancel','cinema_operations','cinema_check_in') loop execute format('revoke all on function %s from public,anon,authenticated',f.sig); end loop;
+end $$;
+grant execute on function cinema_role(),cinema_is_admin(),cinema_employee_save(jsonb),cinema_employees(),cinema_logs(jsonb),cinema_support_search(text,int),cinema_support_cancel(bigint,text),cinema_operations(date),cinema_check_in(bigint,text,boolean) to anon,authenticated;
+update cinema_private.cau_hinh set schema_version='chapter3-three-roles-v3' where id;
 create or replace function public.cinema_check_show() returns trigger language plpgsql set search_path=public,pg_temp as $$
 declare duration integer;
 begin
@@ -1080,7 +1501,7 @@ declare result jsonb;
 begin
  select jsonb_build_object('id',k.khach_hang_id::text,'full_name',k.ho_ten,'email',k.email,'phone',k.so_dien_thoai,'active',k.trang_thai=1,'role','customer') into result from khach_hang k where k.khach_hang_id=cinema_customer_id();
  if result is null then
-  select jsonb_build_object('id',n.nhan_vien_id::text,'full_name',n.ho_ten,'email',n.email,'phone',n.so_dien_thoai,'active',n.trang_thai=1,'role','staff') into result from nhan_vien n where n.nhan_vien_id=cinema_staff_id();
+  select jsonb_build_object('id',n.nhan_vien_id::text,'full_name',n.ho_ten,'email',n.email,'phone',n.so_dien_thoai,'active',n.trang_thai=1,'role',case n.vai_tro when 'QUAN_TRI' then 'admin' else 'staff' end) into result from nhan_vien n where n.nhan_vien_id=cinema_staff_id();
  end if;
  return result;
 end $$;
@@ -1204,6 +1625,7 @@ declare o don_dat_ve; payment thanh_toan;
 begin
  select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
  if o.trang_thai='DA_THANH_TOAN' then
+  if exists(select 1 from ve where don_dat_ve_id=p_order and trang_thai='DA_SU_DUNG') then raise exception 'Không thể hủy đơn có vé đã sử dụng.'; end if;
   select * into payment from thanh_toan where don_dat_ve_id=p_order and loai_giao_dich='THU' and trang_thai='THANH_CONG';
   if payment.thanh_toan_id is null then raise exception 'Không tìm thấy khoản thu để hoàn.'; end if;
   insert into thanh_toan(don_dat_ve_id,phuong_thuc_id,ma_giao_dich,so_tien,trang_thai,loai_giao_dich,giao_dich_goc_id,noi_dung)
@@ -1218,7 +1640,7 @@ end $$;
 create or replace function public.cinema_cancel(p_order bigint) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare o don_dat_ve; show_id bigint; starts timestamptz;
 begin
- select x.suat_chieu_id into show_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id) where d.don_dat_ve_id=p_order and (d.khach_hang_id=cinema_customer_id() or cinema_staff());
+ select x.suat_chieu_id into show_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id) where d.don_dat_ve_id=p_order and d.khach_hang_id=cinema_customer_id();
  if show_id is null then raise exception 'Không tìm thấy đơn.'; end if;
  perform pg_advisory_xact_lock(hashtextextended('show:'||show_id,0));
  select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
@@ -1232,7 +1654,7 @@ end $$;
 create or replace function public.cinema_stop_show(p_show bigint,p_expected jsonb) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare impact jsonb; o record;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform cinema_expire(p_show);
  if not exists(select 1 from suat_chieu where suat_chieu_id=p_show) then raise exception 'Không tìm thấy suất chiếu.'; end if;
  select jsonb_build_object('paid',count(*) filter(where d.trang_thai='DA_THANH_TOAN'),'pending',count(*) filter(where d.trang_thai in ('MOI_TAO','CHO_THANH_TOAN')),
@@ -1240,6 +1662,7 @@ begin
  'tickets',(select count(*) from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=p_show and v.trang_thai<>'DA_HUY'),
  'holds',(select count(distinct ma_luot_giu) from ghe_suat_chieu where suat_chieu_id=p_show and trang_thai='GIU' and don_dat_ve_id is null)) into impact
  from don_dat_ve d join cinema_private.don_snapshot x using(don_dat_ve_id) where x.suat_chieu_id=p_show;
+ if exists(select 1 from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=p_show and v.trang_thai='DA_SU_DUNG') then raise exception 'Không thể hủy suất có vé đã sử dụng.'; end if;
  if p_expected is null or p_expected<>impact then return jsonb_build_object('confirm',true,'impact',impact); end if;
  if not exists(select 1 from cinema_private.don_snapshot where suat_chieu_id=p_show) then
   delete from ghe_suat_chieu where suat_chieu_id=p_show; delete from suat_chieu where suat_chieu_id=p_show;
@@ -1424,6 +1847,7 @@ create or replace function public.cinema_orders(p_order bigint default null) ret
 declare s record; result jsonb;
 begin
  if cinema_customer_id() is null and not cinema_staff() then raise exception 'Vui lòng đăng nhập để tiếp tục.'; end if;
+ if cinema_role()='NHAN_VIEN' and p_order is null then raise exception 'Nhân viên chỉ được tra cứu đơn cụ thể.'; end if;
  for s in select distinct x.suat_chieu_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id)
   where (cinema_staff() or d.khach_hang_id=cinema_customer_id()) and (p_order is null or d.don_dat_ve_id=p_order) and d.trang_thai in ('MOI_TAO','CHO_THANH_TOAN') and d.ngay_dat+interval '10 minutes'<=now() order by x.suat_chieu_id
  loop perform cinema_expire(s.suat_chieu_id); end loop;
@@ -1461,7 +1885,7 @@ end $$;
 create or replace function public.cinema_admin() returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare result jsonb;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform cinema_expire_all(); result:=cinema_catalog();
  return result||jsonb_build_object('seats',coalesce((select jsonb_agg(cinema_seat_json(ghe_id) order by ghe_id) from ghe),'[]'::jsonb),
  'orders',(cinema_orders()->'orders'),
@@ -1481,7 +1905,7 @@ create or replace function public.cinema_admin_save(p_entity text,p_data jsonb) 
 declare v_id bigint:=nullif(p_data->>'id','')::bigint; old_movie phim; old_room phong_chieu; old_show suat_chieu; old_promo khuyen_mai;
  movie_row phim; room_id integer; start_time timestamptz; end_time timestamptz; busy boolean; x jsonb; genre text; capacity integer; used integer;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform pg_advisory_xact_lock(hashtextextended('cinema_catalog',0));
  if p_entity='movies' then
   select * into old_movie from phim where phim_id=v_id;
@@ -1684,7 +2108,7 @@ update phuong_thuc_thanh_toan set trang_thai=1,mo_ta='Cổng thanh toán thử n
 
 -- Cập nhật các chính sách đã biết trong một giao dịch; không xóa bảng.
 do $$ declare p record; begin
- for p in select schemaname,tablename,policyname from pg_policies where schemaname='public' and tablename=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan']) and policyname=any(array['staff_read','staff_read','public_genres','public_movies','public_movie_genres','public_rooms','public_seat_types','public_seats','public_shows','own_customer','own_employee','own_orders','own_show_seats','own_tickets','own_transactions']) loop
+ for p in select schemaname,tablename,policyname from pg_policies where schemaname='public' and tablename=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan','nhat_ky_hoat_dong']) and policyname=any(array['staff_read','staff_read','public_genres','public_movies','public_movie_genres','public_rooms','public_seat_types','public_seats','public_shows','own_customer','own_employee','own_orders','own_show_seats','own_tickets','own_transactions']) loop
   execute format('drop policy %I on %I.%I',p.policyname,p.schemaname,p.tablename);
  end loop;
 end $$;
@@ -1694,7 +2118,7 @@ do $$ declare t text; begin
   execute format('alter table public.%I enable row level security',t);
   execute format('revoke all on public.%I from public,anon,authenticated',t);
   if t not in ('khach_hang','nhan_vien') then execute format('grant select on public.%I to anon,authenticated',t); end if;
-  execute format('create policy staff_read on public.%I for select to anon,authenticated using (public.cinema_staff())',t);
+  execute format('create policy staff_read on public.%I for select to anon,authenticated using (public.cinema_is_admin())',t);
  end loop;
 end $$;
 grant select(khach_hang_id,ho_ten,email,so_dien_thoai,ngay_sinh,gioi_tinh,trang_thai,ngay_tao) on khach_hang to anon,authenticated;
@@ -1741,12 +2165,12 @@ create index if not exists cinema_snapshot_show on cinema_private.don_snapshot(s
 create index if not exists cinema_transactions_order on public.thanh_toan(don_dat_ve_id,loai_giao_dich,trang_thai);
 create index if not exists cinema_tickets_order on public.ve(don_dat_ve_id);
 create index if not exists cinema_session_expiry on cinema_private.phien_dang_nhap(het_han);
-update cinema_private.cau_hinh set schema_version='chapter3-audit-v2' where id;
+update cinema_private.cau_hinh set schema_version='chapter3-three-roles-v3' where id;
 notify pgrst,'reload schema';
 $xyz_upgrade$;
   raise notice 'XYZ Cinema: đã cập nhật tính năng; giữ dữ liệu và tài khoản hiện có.';
  else
-  raise exception 'Cấu trúc database thiếu hoặc không nhận diện được. Dừng và giữ dữ liệu; không tự reset. Cần database Supabase mới hoặc đủ 15 bảng Chương 3.';
+  raise exception 'Cấu trúc database thiếu hoặc không nhận diện được. Dừng và giữ dữ liệu; không tự reset. Cần database Supabase mới hoặc đủ bảng Chương 3.';
  end if;
 end $xyz_deploy$;
 
@@ -1790,14 +2214,15 @@ end $xyz_cron$;
 notify pgrst,'reload schema';
 commit;
 
--- 4. Kết quả cuối: thấy xyz-cinema-deploy-v1 và các mục kiểm tra là true.
-select 'xyz-cinema-deploy-v1' as ket_qua,
- (select count(*)::integer from pg_tables where schemaname='public' and tablename=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan'])) as bang_nghiep_vu,
+-- 4. Kết quả cuối: thấy xyz-cinema-three-roles-v3 và các mục kiểm tra là true.
+select 'xyz-cinema-three-roles-v3' as ket_qua,
+ (select count(*)::integer from pg_tables where schemaname='public' and tablename=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan','nhat_ky_hoat_dong'])) as bang_nghiep_vu,
  not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
-  where n.nspname='public' and c.relname=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan']) and not c.relrowsecurity) as rls_day_du,
+  where n.nspname='public' and c.relname=any(array['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan','nhat_ky_hoat_dong']) and not c.relrowsecurity) as rls_day_du,
  to_regprocedure('public.cinema_catalog()') is not null as tam_diem_tuan,
  to_regprocedure('public.cinema_vnpay_query_attempt(bigint,bigint)') is not null as vnpay_confirmation_v2,
  exists(select 1 from public.nhan_vien where lower(ten_dang_nhap)='admin') as co_tai_khoan_admin,
+ (select count(*)::int from public.nhan_vien where vai_tro='NHAN_VIEN' and trang_thai=1) as so_nhan_vien,
  exists(select 1 from cron.job where jobname='xyz-cinema-expire' and username=current_user and database=current_database() and active) as cron_het_han,
  (select count(*)::integer from public.phim) as so_phim,
  (select count(*)::integer from public.phong_chieu) as so_phong,

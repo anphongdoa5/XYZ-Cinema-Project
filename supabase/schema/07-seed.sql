@@ -1,6 +1,10 @@
--- Dữ liệu mẫu theo 15 bảng Chương 3; không tạo tài khoản Auth/mật khẩu mẫu.
+-- Dữ liệu mẫu. Không tạo tài khoản khách hàng. Mật khẩu được băm bcrypt.
 insert into nhan_vien(nhan_vien_id,ho_ten,email,vai_tro,ten_dang_nhap,mat_khau)
-values(1,'Nhân viên khởi tạo dữ liệu','seed@xyz-cinema.invalid','NHAN_VIEN','du_lieu_mau',crypt(encode(gen_random_bytes(32),'hex'),gen_salt('bf',12))) on conflict(nhan_vien_id) do nothing;
+values(1,'Quản trị viên demo','admin@xyz-cinema.test','QUAN_TRI','admin',crypt('admin',gen_salt('bf',12))) on conflict do nothing;
+select setval(pg_get_serial_sequence('public.nhan_vien','nhan_vien_id'),greatest((select max(nhan_vien_id) from nhan_vien),1),true);
+insert into nhan_vien(ho_ten,email,so_dien_thoai,vai_tro,ten_dang_nhap,mat_khau)
+select 'Nhân viên '||lpad(i::text,2,'0'),'nv'||lpad(i::text,2,'0')||'@xyz-cinema.test','090000000'||i,'NHAN_VIEN','nv'||lpad(i::text,2,'0'),crypt('Nhanvien123!',gen_salt('bf',12))
+from generate_series(1,5) i on conflict do nothing;
 insert into the_loai(the_loai_id,ten_the_loai) values
 (1,'Khoa học viễn tưởng'),(2,'Tình cảm'),(3,'Gia đình'),(4,'Bí ẩn'),(5,'Giật gân'),(6,'Phiêu lưu'),(7,'Hành động') on conflict(the_loai_id) do nothing;
 insert into loai_ghe(loai_ghe_id,ten_loai_ghe,he_so_gia,mo_ta) values

@@ -4,7 +4,7 @@ import type {Profile} from './types';
 import type {SessionScope} from './session';
 export async function identity(client?:Awaited<ReturnType<typeof createClient>>,scope:SessionScope='customer'){
  const db=client??await createClient(scope);const {data,error}=await db.rpc('cinema_profile');databaseError(error);
- const candidate=data as Profile|null;const profile=candidate?.role===(scope==='admin'?'staff':'customer')?candidate:null;return {db,user:profile?{id:profile.id}:null,profile};
+ const candidate=data as Profile|null;const profile=(scope==='admin'?candidate?.role==='staff'||candidate?.role==='admin':candidate?.role==='customer')?candidate:null;return {db,user:profile?{id:profile.id}:null,profile};
 }
 export function databaseError(error:{message:string;code?:string}|null){
  if(!error)return;

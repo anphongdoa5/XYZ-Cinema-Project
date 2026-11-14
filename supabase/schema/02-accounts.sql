@@ -18,7 +18,7 @@ declare result jsonb;
 begin
  select jsonb_build_object('id',k.khach_hang_id::text,'full_name',k.ho_ten,'email',k.email,'phone',k.so_dien_thoai,'active',k.trang_thai=1,'role','customer') into result from khach_hang k where k.khach_hang_id=cinema_customer_id();
  if result is null then
-  select jsonb_build_object('id',n.nhan_vien_id::text,'full_name',n.ho_ten,'email',n.email,'phone',n.so_dien_thoai,'active',n.trang_thai=1,'role','staff') into result from nhan_vien n where n.nhan_vien_id=cinema_staff_id();
+  select jsonb_build_object('id',n.nhan_vien_id::text,'full_name',n.ho_ten,'email',n.email,'phone',n.so_dien_thoai,'active',n.trang_thai=1,'role',case n.vai_tro when 'QUAN_TRI' then 'admin' else 'staff' end) into result from nhan_vien n where n.nhan_vien_id=cinema_staff_id();
  end if;
  return result;
 end $$;

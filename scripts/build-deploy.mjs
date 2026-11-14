@@ -10,10 +10,10 @@ export function buildDeploy(root){
   return sql.slice(start+'\nbegin;\n'.length,end).trim();
  };
  const quote=(tag,sql)=>{const delimiter='$xyz_'+tag+'$';if(sql.includes(delimiter))throw Error('SQL delimiter collision');return delimiter+'\n'+sql+'\n'+delimiter;};
- const tables=['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan'];
+ const tables=['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan','nhat_ky_hoat_dong'];
  const names=tables.map(t=>"'"+t+"'").join(',');
  const sql=`-- XYZ CINEMA · TRIỂN KHAI DATABASE BẰNG MỘT TỆP
--- Phiên bản gói: xyz-cinema-deploy-v1 · 11/11/2026.
+-- Phiên bản gói: xyz-cinema-three-roles-v3 · 13/11/2026.
 -- Supabase SQL Editor → New query → dán TOÀN BỘ tệp → Run (role postgres).
 -- Cài mới: đủ cấu trúc, RLS/RPC, dữ liệu mẫu, admin/admin, Tâm điểm, VNPay v2, Cron.
 -- Đã cài Chương 3: cập nhật giữ dữ liệu; không nạp lại seed hoặc đổi mật khẩu admin.
@@ -40,11 +40,11 @@ begin
  if business_count=0 and to_regnamespace('cinema_private') is null then
   execute ${quote('fresh',transactionBody('supabase/install.sql'))};
   raise notice 'XYZ Cinema: đã cài mới cấu trúc, tính năng và dữ liệu mẫu.';
- elsif business_count=15 and to_regclass('cinema_private.cau_hinh') is not null then
+ elsif business_count in (15,16) and to_regclass('cinema_private.cau_hinh') is not null then
   execute ${quote('upgrade',transactionBody('supabase/upgrade.sql'))};
   raise notice 'XYZ Cinema: đã cập nhật tính năng; giữ dữ liệu và tài khoản hiện có.';
  else
-  raise exception 'Cấu trúc database thiếu hoặc không nhận diện được. Dừng và giữ dữ liệu; không tự reset. Cần database Supabase mới hoặc đủ 15 bảng Chương 3.';
+  raise exception 'Cấu trúc database thiếu hoặc không nhận diện được. Dừng và giữ dữ liệu; không tự reset. Cần database Supabase mới hoặc đủ bảng Chương 3.';
  end if;
 end $xyz_deploy$;
 
@@ -88,14 +88,15 @@ end $xyz_cron$;
 notify pgrst,'reload schema';
 commit;
 
--- 4. Kết quả cuối: thấy xyz-cinema-deploy-v1 và các mục kiểm tra là true.
-select 'xyz-cinema-deploy-v1' as ket_qua,
+-- 4. Kết quả cuối: thấy xyz-cinema-three-roles-v3 và các mục kiểm tra là true.
+select 'xyz-cinema-three-roles-v3' as ket_qua,
  (select count(*)::integer from pg_tables where schemaname='public' and tablename=any(array[${names}])) as bang_nghiep_vu,
  not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
   where n.nspname='public' and c.relname=any(array[${names}]) and not c.relrowsecurity) as rls_day_du,
  to_regprocedure('public.cinema_catalog()') is not null as tam_diem_tuan,
  to_regprocedure('public.cinema_vnpay_query_attempt(bigint,bigint)') is not null as vnpay_confirmation_v2,
  exists(select 1 from public.nhan_vien where lower(ten_dang_nhap)='admin') as co_tai_khoan_admin,
+ (select count(*)::int from public.nhan_vien where vai_tro='NHAN_VIEN' and trang_thai=1) as so_nhan_vien,
  exists(select 1 from cron.job where jobname='xyz-cinema-expire' and username=current_user and database=current_database() and active) as cron_het_han,
  (select count(*)::integer from public.phim) as so_phim,
  (select count(*)::integer from public.phong_chieu) as so_phong,

@@ -54,6 +54,7 @@ create function public.cinema_orders(p_order bigint default null) returns jsonb 
 declare s record; result jsonb;
 begin
  if cinema_customer_id() is null and not cinema_staff() then raise exception 'Vui lòng đăng nhập để tiếp tục.'; end if;
+ if cinema_role()='NHAN_VIEN' and p_order is null then raise exception 'Nhân viên chỉ được tra cứu đơn cụ thể.'; end if;
  for s in select distinct x.suat_chieu_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id)
   where (cinema_staff() or d.khach_hang_id=cinema_customer_id()) and (p_order is null or d.don_dat_ve_id=p_order) and d.trang_thai in ('MOI_TAO','CHO_THANH_TOAN') and d.ngay_dat+interval '10 minutes'<=now() order by x.suat_chieu_id
  loop perform cinema_expire(s.suat_chieu_id); end loop;
@@ -88,7 +89,7 @@ end $$;
 create function public.cinema_admin() returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare result jsonb;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform cinema_expire_all(); result:=cinema_catalog();
  return result||jsonb_build_object('seats',coalesce((select jsonb_agg(cinema_seat_json(ghe_id) order by ghe_id) from ghe),'[]'::jsonb),
  'orders',(cinema_orders()->'orders'),

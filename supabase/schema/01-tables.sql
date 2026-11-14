@@ -192,7 +192,7 @@ create table cinema_private.cau_hinh (
  id boolean primary key default true check(id),
  simulation_enabled boolean not null default true,
  simulation_outcome text not null default 'success' check(simulation_outcome in ('success','failed','timeout')),
- schema_version text not null default 'chapter3-audit-v2',
+ schema_version text not null default 'chapter3-three-roles-v3',
  dummy_password_hash text not null default crypt(gen_random_uuid()::text,gen_salt('bf',12))
 );
 insert into cinema_private.cau_hinh(id) values(true);

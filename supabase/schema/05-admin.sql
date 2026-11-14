@@ -2,7 +2,7 @@ create function public.cinema_admin_save(p_entity text,p_data jsonb) returns tex
 declare v_id bigint:=nullif(p_data->>'id','')::bigint; old_movie phim; old_room phong_chieu; old_show suat_chieu; old_promo khuyen_mai;
  movie_row phim; room_id integer; start_time timestamptz; end_time timestamptz; busy boolean; x jsonb; genre text; capacity integer; used integer;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform pg_advisory_xact_lock(hashtextextended('cinema_catalog',0));
  if p_entity='movies' then
   select * into old_movie from phim where phim_id=v_id;

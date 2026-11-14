@@ -10,7 +10,8 @@ const sources=files.map(file=>read('supabase/schema/'+file));
 const gateway=read('supabase/schema/08-vnpay.sql');
 const [gatewayTables,gatewayRest]=gateway.split('-- BEGIN RPC');
 const [gatewayRpc,gatewayActivation]=gatewayRest.split('-- BEGIN ACTIVATION');
-const schema=[sources[0],gatewayTables,...sources.slice(1),gatewayRpc].join('\n\n'),seed=read('supabase/schema/07-seed.sql');
+const roles=read('supabase/schema/09-internal-roles.sql');
+const schema=[sources[0],gatewayTables,...sources.slice(1,5),roles,sources[5],gatewayRpc].join('\n\n'),seed=read('supabase/schema/07-seed.sql');
 const header='-- XYZ Cinema · Chương 3, Bảng 3.1–3.17.\n-- Sinh bằng node scripts/build-database.mjs; nguồn trong supabase/schema/.\n';
 // Baseline đã phát hành được giữ nguyên; thay đổi dùng migration kế tiếp.
 if(!fs.existsSync(path.join(root,'supabase/migrations/202611090001_chapter3.sql')))write('supabase/migrations/202611090001_chapter3.sql',header+'begin;\n'+schema+'\ncommit;');
@@ -24,7 +25,7 @@ do $$ begin
  end if;
 end $$;
 `+schema+'\n\n-- DỮ LIỆU MẪU\n'+seed+'\n'+gatewayActivation+'\ncommit;\n\n'+read('supabase/verify.sql'));
-const tables=['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan'];
+const tables=['khach_hang','nhan_vien','the_loai','phim','phim_the_loai','phong_chieu','loai_ghe','ghe','suat_chieu','ghe_suat_chieu','don_dat_ve','ve','khuyen_mai','phuong_thuc_thanh_toan','thanh_toan','nhat_ky_hoat_dong'];
 const literal=values=>values.map(value=>"'"+value+"'").join(',');
 const functions=[...schema.matchAll(/create function public\.[\s\S]*?\$\$;/g)].map(match=>match[0].replace('create function','create or replace function')).join('\n\n');
 const policyNames=['staff_read',...[...sources.at(-1).matchAll(/create policy (\w+) on/g)].map(match=>match[1])];
@@ -34,14 +35,15 @@ begin;
 set local search_path=public,extensions,pg_temp;
 do $$ begin
  perform pg_advisory_xact_lock(hashtextextended('xyz_cinema_install',0));
- if (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname=any(array[${literal(tables)}]) and c.relkind='r')<>15 or to_regclass('cinema_private.cau_hinh') is null then
+ if (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname=any(array[${literal(tables)}]) and c.relkind='r')not in (15,16) or to_regclass('cinema_private.cau_hinh') is null then
   raise exception 'Chưa có đủ cấu trúc Chương 3. Dừng cập nhật, không thay đổi dữ liệu. Xem supabase/README.md.';
  end if;
- if not exists(select 1 from cinema_private.cau_hinh where id and schema_version in ('chapter3-custom-auth-v1','chapter3-audit-v2')) then
+ if not exists(select 1 from cinema_private.cau_hinh where id and schema_version in ('chapter3-custom-auth-v1','chapter3-audit-v2','chapter3-three-roles-v3')) then
   raise exception 'Phiên bản database chưa được nhận diện. Dừng cập nhật để kiểm tra.';
  end if;
 end $$;
 ${gatewayTables}
+${roles}
 ${functions}
 ${gatewayRpc}
 ${gatewayActivation}
@@ -63,7 +65,7 @@ create index if not exists cinema_snapshot_show on cinema_private.don_snapshot(s
 create index if not exists cinema_transactions_order on public.thanh_toan(don_dat_ve_id,loai_giao_dich,trang_thai);
 create index if not exists cinema_tickets_order on public.ve(don_dat_ve_id);
 create index if not exists cinema_session_expiry on cinema_private.phien_dang_nhap(het_han);
-update cinema_private.cau_hinh set schema_version='chapter3-audit-v2' where id;
+update cinema_private.cau_hinh set schema_version='chapter3-three-roles-v3' where id;
 notify pgrst,'reload schema';
 commit;
 select public.cinema_version() as phien_ban;
@@ -101,4 +103,7 @@ const confirmation=header+"-- Sửa xác nhận VNPay; giữ tài khoản, đơn
 write('supabase/fix-vnpay-confirmation.sql',confirmation);
 if(!fs.existsSync(path.join(root,'supabase/migrations/202611100005_vnpay_confirmation.sql')))write('supabase/migrations/202611100005_vnpay_confirmation.sql',confirmation);
 buildDeploy(root);
-console.log('Generated supabase/deploy.sql: one SQL Editor entry point for fresh install or upgrade.');
+const reset=read('supabase/reset.sql'),deploy=read('supabase/deploy.sql');
+const resetBody=reset.slice(reset.indexOf('begin;')+6,reset.lastIndexOf('commit;'));
+write('supabase/reset-and-deploy.sql','-- RESET + TRIỂN KHAI MỘT LẦN. XÓA TOÀN BỘ DỮ LIỆU XYZ CINEMA.\n-- Chỉ chạy khi muốn cài lại; không xóa auth/storage hoặc ứng dụng khác.\n'+deploy.replace('begin;',()=> 'begin;\n'+resetBody));
+console.log('Generated deploy.sql and reset-and-deploy.sql.');

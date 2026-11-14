@@ -30,9 +30,9 @@ try {
   console.log(`Kết nối thành công. Đọc được ${Array.isArray(data) ? data.length : 0} phim.`);
   const versionResponse = await fetch(parsed.origin+'/rest/v1/rpc/cinema_version', { method:'POST', headers:{apikey:key,'Content-Type':'application/json'}, body:'{}', signal:AbortSignal.timeout(10000) });
   const version = await versionResponse.json();
-  if (!versionResponse.ok || version !== 'chapter3-audit-v2') {
+  if (!versionResponse.ok || version !== 'chapter3-three-roles-v3') {
     console.error('Database cần cập nhật. Mở supabase/deploy.sql, Ctrl+A → Ctrl+C; Supabase → SQL Editor → New query → dán toàn bộ → Run. Không chạy reset.sql. Dữ liệu hiện có được giữ nguyên.'); process.exit(1);
   }
-  console.log('Phiên bản nghiệp vụ: chapter3-audit-v2.');
+  console.log('Phiên bản nghiệp vụ: chapter3-three-roles-v3.');
   console.log('Tiếp theo: npm.cmd run dev → http://localhost:3000/cai-dat để kiểm tra các danh mục và dữ liệu mẫu.');
 } catch { console.error('Chưa kết nối được Supabase. Kiểm tra Project URL gốc, mạng và trạng thái hoạt động của project.'); process.exit(1); }

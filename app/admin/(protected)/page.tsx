@@ -1,2 +1,4 @@
 import {redirect} from 'next/navigation';
-export default function Page(){redirect('/admin/lich-chieu');}
+import {identity} from '@/lib/cinema/server';
+import {internalHome} from '@/lib/cinema/permissions';
+export default async function Page(){const {profile}=await identity(undefined,'admin');redirect(profile?internalHome(profile.role):'/admin/login');}

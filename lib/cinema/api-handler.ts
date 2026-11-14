@@ -61,7 +61,22 @@ export function createCinemaHandler(scope:SessionScope){const cookieName=session
    if(resource==='reservation')return reply(await rpc('cinema_reservation',{p_show:id.parse(key)}));
    if(resource==='holds')return reply(await rpc('cinema_hold_details',{p_hold:holdId.parse(key)}));
    if(resource==='orders')return reply(await rpc('cinema_orders',{p_order:key?id.parse(key):null}));
-   if(resource==='admin'){if(profile.role!=='staff')return reply({error:'Bạn không có quyền quản trị.'},403);return reply(await rpc('cinema_admin'));}
+   if(resource==='admin'){if(profile.role!=='admin')return reply({error:'Bạn không có quyền quản trị.'},403);return reply(await rpc('cinema_admin'));}
+   if(scope==='admin'){
+    const query=request.nextUrl.searchParams;
+    if(['employees','logs'].includes(resource)&&profile.role!=='admin')return reply({error:'Chỉ quản trị viên được sử dụng chức năng này.'},403);
+    if(resource==='employees')return reply(await rpc('cinema_employees'));
+    if(resource==='logs'){
+     const filter=z.object({from:z.iso.date().optional(),to:z.iso.date().optional(),actor:id.optional(),action:z.string().max(50).optional(),type:z.string().max(50).optional(),object:id.optional(),result:z.enum(['THANH_CONG','THAT_BAI']).optional(),page:z.coerce.number().int().min(1).max(100000).default(1)}).parse(Object.fromEntries(query));
+     if(filter.from&&filter.to&&filter.from>filter.to)return reply({error:'Từ ngày phải trước hoặc bằng đến ngày.'},400);
+     return reply(await rpc('cinema_logs',{p_filter:filter}));
+    }
+    if(resource==='support')return reply(await rpc('cinema_support_search',{p_query:z.string().trim().min(5).max(100).parse(query.get('query')),p_page:z.coerce.number().int().min(1).max(10000).default(1).parse(query.get('page')??undefined)}));
+    if(resource==='operations'){
+     if(profile.role!=='staff')return reply({error:'Chức năng này dành cho nhân viên rạp.'},403);
+     return reply(await rpc('cinema_operations',query.has('day')?{p_day:z.iso.date().parse(query.get('day'))}:{}));
+    }
+   }
    return reply({error:'Không tìm thấy chức năng.'},404);
   }
   if(request.method!=='POST')return reply({error:'Không tìm thấy chức năng.'},404);
@@ -72,10 +87,19 @@ export function createCinemaHandler(scope:SessionScope){const cookieName=session
    case 'order':name='cinema_order';args={p_hold:holdId.parse(body.holdId),p_expected:z.number().int().nonnegative().parse(body.expected)};break;
    case 'promo':name='cinema_promo';args={p_order:id.parse(body.orderId),p_code:z.string().max(50).parse(body.code)};break;
    case 'pay':name='cinema_pay';args={p_order:id.parse(body.orderId),p_expected:z.number().int().nonnegative().parse(body.expected)};break;
-   case 'cancel':name='cinema_cancel';args={p_order:id.parse(body.orderId)};break;
+   case 'cancel':name=scope==='admin'?'cinema_support_cancel':'cinema_cancel';args={p_order:id.parse(body.orderId),...(scope==='admin'?{p_reason:z.string().trim().min(3).max(255).parse(body.reason)}:{})};break;
    case 'change-password':name='cinema_change_password';args={p_current:z.string().max(100).parse(body.current),p_new:password.parse(body.password)};break;
-   case 'stop-show':if(profile.role!=='staff')return reply({error:'Không có quyền.'},403);name='cinema_stop_show';args={p_show:id.parse(body.showtimeId),p_expected:body.expected||null};break;
-   case 'save':{if(profile.role!=='staff')return reply({error:'Không có quyền.'},403);const entity=z.enum(['movies','rooms','showtimes','promotions']).parse(body.entity);name='cinema_admin_save';args={p_entity:entity,p_data:parseAdminData(entity,body.data)};break;}
+   case 'stop-show':if(profile.role!=='admin')return reply({error:'Không có quyền.'},403);name='cinema_stop_show';args={p_show:id.parse(body.showtimeId),p_expected:body.expected||null};break;
+   case 'save':{if(profile.role!=='admin')return reply({error:'Không có quyền.'},403);const entity=z.enum(['movies','rooms','showtimes','promotions']).parse(body.entity);name='cinema_admin_save';args={p_entity:entity,p_data:parseAdminData(entity,body.data)};break;}
+   case 'employee':{
+    if(scope!=='admin'||profile.role!=='admin')return reply({error:'Chỉ quản trị viên được quản lý tài khoản.'},403);
+    const data=z.object({id:id.optional(),full_name:z.string().trim().min(1).max(100),email:z.email().max(100),phone:z.string().regex(/^(|\+?[0-9]{9,15})$/),username:z.string().regex(/^[a-zA-Z0-9_.-]{3,50}$/),role:z.enum(['admin','staff']),active:z.boolean(),password:z.union([z.literal(''),password]).optional(),reason:z.string().trim().min(3).max(255)}).parse(body);
+    name='cinema_employee_save';args={p_data:data};break;
+   }
+   case 'check-in':{
+    if(scope!=='admin'||profile.role!=='staff')return reply({error:'Chỉ nhân viên rạp được kiểm soát vé.'},403);
+    name='cinema_check_in';args={p_show:id.parse(body.showtimeId),p_code:z.string().trim().min(1).max(20).parse(body.code),p_confirm:z.boolean().parse(body.confirm)};break;
+   }
    default:return reply({error:'Không tìm thấy chức năng.'},404);
   }
   const data=await rpc(name,args);

@@ -33,8 +33,8 @@ export async function checkSetup(): Promise<SetupReport> {
       method: 'POST', headers: { apikey: config.key, 'Content-Type': 'application/json' }, body: '{}', cache: 'no-store', signal: AbortSignal.timeout(8000),
     });
     const version = await versionResponse.json();
-    const currentVersion = versionResponse.ok && version === 'chapter3-audit-v2';
-    checks.push({ label: 'Phiên bản nghiệp vụ', ok: currentVersion, detail: currentVersion ? 'Đã cập nhật chapter3-audit-v2.' : 'Database đã có danh mục nhưng cần cập nhật các hàm nghiệp vụ và báo cáo.' });
+    const currentVersion = versionResponse.ok && version === 'chapter3-three-roles-v3';
+    checks.push({ label: 'Phiên bản nghiệp vụ', ok: currentVersion, detail: currentVersion ? 'Đã cập nhật chapter3-three-roles-v3.' : 'Database đã có danh mục nhưng cần cập nhật các hàm nghiệp vụ và báo cáo.' });
     if (!currentVersion) return { ready: false, checks, nextStep: 'Supabase → SQL Editor → New query (role postgres): dán TOÀN BỘ supabase/deploy.sql rồi Run. Tệp giữ dữ liệu hiện có; không cần chạy các bản vá riêng.' };
     const labels: Record<string, string> = { phim: 'phim', phong_chieu: 'phòng', suat_chieu: 'suất chiếu', ghe: 'đơn vị ghế' };
     const hasData = results.every(r => r.count > 0);

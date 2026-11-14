@@ -11,10 +11,15 @@ Mã nguồn dùng Next.js, React, TypeScript và Supabase PostgreSQL. Chỉ cầ
 
 ## 2. Triển khai database bằng một lần Run
 
+**Cài lại theo tài liệu ba vai trò:** chạy toàn bộ [supabase/reset-and-deploy.sql](supabase/reset-and-deploy.sql) trong SQL Editor bằng role postgres. File này xóa dữ liệu XYZ Cinema rồi tạo cấu trúc và dữ liệu mẫu trong một giao dịch. Không chạy reset.sql hoặc deploy.sql thêm sau đó.
+
+**Chỉ cập nhật, giữ dữ liệu:** làm theo các bước deploy.sql bên dưới. [reset.sql](supabase/reset.sql) là script chỉ xóa, dành cho trường hợp cần tách riêng bước reset.
+
+
 1. Mở [supabase/deploy.sql](supabase/deploy.sql), sao chép **toàn bộ nội dung tệp**.
 2. Vào đúng project Supabase → **SQL Editor → New query**, chọn role **postgres**.
 3. Dán toàn bộ rồi bấm **Run** một lần và đợi hoàn tất.
-4. Kết quả cuối cần có `ket_qua = xyz-cinema-deploy-v1`, `bang_nghiep_vu = 15`; các cột `rls_day_du`, `tam_diem_tuan`, `vnpay_confirmation_v2`, `co_tai_khoan_admin`, `cron_het_han` đều là `true`.
+4. Kết quả cuối cần có `ket_qua = xyz-cinema-three-roles-v3`, `bang_nghiep_vu = 16`; các cột `rls_day_du`, `tam_diem_tuan`, `vnpay_confirmation_v2`, `co_tai_khoan_admin`, `cron_het_han` đều là `true`.
 
 Nếu báo không bật được `pg_cron`, kiểm tra project đang hoạt động, role SQL Editor là `postgres` và Supabase → Integrations → Cron. Sau khi bật Cron, chạy lại **chính `deploy.sql`**. Gói cài đặt sẽ chưa commit nếu bước đăng ký Cron thất bại.
 
@@ -62,6 +67,17 @@ npm start
 
 ## 5. Tài khoản và dữ liệu demo
 
-**Nhân viên quản trị mẫu:** tên đăng nhập `admin`, mật khẩu `admin`. Tệp chỉ tạo tài khoản khi chưa tồn tại. Nếu chạy lại trên database cũ, dùng mật khẩu admin hiện tại; gói không đặt lại mật khẩu. Có thể đổi mật khẩu tại `/auth/update-password`; nên đổi trước khi công khai hệ thống.
+**Nhân viên quản trị mẫu:** tên đăng nhập `admin`, mật khẩu `admin`. Có thể đổi mật khẩu tại `/auth/update-password`.
 
 **Khách hàng:** đăng ký ngay trên website bằng email, số điện thoại và mật khẩu tự chọn. 
+
+## Tài khoản và màn hình sau khi cài lại
+
+| Vai trò | Tên đăng nhập | Mật khẩu mẫu | Màn hình đầu tiên |
+|---|---|---|---|
+| Quản trị viên | admin | admin | /admin/lich-chieu |
+| 5 nhân viên rạp | nv01, nv02, nv03, nv04, nv05 | Nhanvien123! | /admin/van-hanh |
+
+Cả hai vai trò nội bộ đăng nhập tại `/admin/login`. Khách hàng tự đăng ký trên website. Tài khoản nội bộ được cấp tại `/admin/tai-khoan`, nhật ký tại `/admin/nhat-ky`, nhân viên kiểm soát từng vé tại `/admin/kiem-soat`. Quét bằng thiết bị đọc QR đưa mã vào ô nhập, hoặc nhập mã vé thủ công.
+
+

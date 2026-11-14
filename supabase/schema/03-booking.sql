@@ -53,6 +53,7 @@ declare o don_dat_ve; payment thanh_toan;
 begin
  select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
  if o.trang_thai='DA_THANH_TOAN' then
+  if exists(select 1 from ve where don_dat_ve_id=p_order and trang_thai='DA_SU_DUNG') then raise exception 'Không thể hủy đơn có vé đã sử dụng.'; end if;
   select * into payment from thanh_toan where don_dat_ve_id=p_order and loai_giao_dich='THU' and trang_thai='THANH_CONG';
   if payment.thanh_toan_id is null then raise exception 'Không tìm thấy khoản thu để hoàn.'; end if;
   insert into thanh_toan(don_dat_ve_id,phuong_thuc_id,ma_giao_dich,so_tien,trang_thai,loai_giao_dich,giao_dich_goc_id,noi_dung)
@@ -66,7 +67,7 @@ end $$;
 create function public.cinema_cancel(p_order bigint) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare o don_dat_ve; show_id bigint; starts timestamptz;
 begin
- select x.suat_chieu_id into show_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id) where d.don_dat_ve_id=p_order and (d.khach_hang_id=cinema_customer_id() or cinema_staff());
+ select x.suat_chieu_id into show_id from cinema_private.don_snapshot x join don_dat_ve d using(don_dat_ve_id) where d.don_dat_ve_id=p_order and d.khach_hang_id=cinema_customer_id();
  if show_id is null then raise exception 'Không tìm thấy đơn.'; end if;
  perform pg_advisory_xact_lock(hashtextextended('show:'||show_id,0));
  select * into o from don_dat_ve where don_dat_ve_id=p_order for update;
@@ -79,7 +80,7 @@ end $$;
 create function public.cinema_stop_show(p_show bigint,p_expected jsonb) returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare impact jsonb; o record;
 begin
- if not cinema_staff() then raise exception 'Bạn không có quyền quản trị.'; end if;
+ if not cinema_is_admin() then raise exception 'Bạn không có quyền quản trị.'; end if;
  perform cinema_expire(p_show);
  if not exists(select 1 from suat_chieu where suat_chieu_id=p_show) then raise exception 'Không tìm thấy suất chiếu.'; end if;
  select jsonb_build_object('paid',count(*) filter(where d.trang_thai='DA_THANH_TOAN'),'pending',count(*) filter(where d.trang_thai in ('MOI_TAO','CHO_THANH_TOAN')),
@@ -87,6 +88,7 @@ begin
  'tickets',(select count(*) from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=p_show and v.trang_thai<>'DA_HUY'),
  'holds',(select count(distinct ma_luot_giu) from ghe_suat_chieu where suat_chieu_id=p_show and trang_thai='GIU' and don_dat_ve_id is null)) into impact
  from don_dat_ve d join cinema_private.don_snapshot x using(don_dat_ve_id) where x.suat_chieu_id=p_show;
+ if exists(select 1 from ve v join ghe_suat_chieu g using(ghe_suat_chieu_id) where g.suat_chieu_id=p_show and v.trang_thai='DA_SU_DUNG') then raise exception 'Không thể hủy suất có vé đã sử dụng.'; end if;
  if p_expected is null or p_expected<>impact then return jsonb_build_object('confirm',true,'impact',impact); end if;
  if not exists(select 1 from cinema_private.don_snapshot where suat_chieu_id=p_show) then
   delete from ghe_suat_chieu where suat_chieu_id=p_show; delete from suat_chieu where suat_chieu_id=p_show;
