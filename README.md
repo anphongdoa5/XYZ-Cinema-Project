@@ -20,10 +20,4 @@ Test trực tiếp hệ thống tại: https://xyzcinema.vercel.app/
 Xem **[hướng dẫn triển khai đầy đủ](HUONG_DAN_CHAY.md)** để cấu hình VNPay, chạy production và kiểm tra kết nối.
 
 
-
-
-## Cài lại theo mô hình ba vai trò
-
-Chạy toàn bộ **[supabase/reset-and-deploy.sql](supabase/reset-and-deploy.sql)** một lần trong Supabase SQL Editor (role postgres). Script xóa dữ liệu XYZ Cinema và tạo lại đầy đủ; không xóa Auth/Storage hoặc bảng ứng dụng khác.
-
 Quản trị: `admin / admin`. Nhân viên: `nv01`–`nv05 / Nhanvien123!`. Đăng nhập ở `/admin/login` và được điều hướng theo đúng vai trò.
